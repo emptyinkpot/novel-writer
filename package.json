@@ -1,0 +1,16 @@
+{
+  "name": "novel-writer",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "build": "pnpm -r run build",
+    "lint": "pnpm -r run lint"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-white text-gray-900 antialiased dark:bg-zinc-950 dark:text-zinc-200;
+  }
+}
+
+.h-screen-dynamic {
+  height: 100vh;
+  height: 100dvh;
+}
