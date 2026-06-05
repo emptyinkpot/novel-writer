@@ -6,7 +6,7 @@ export default function Footer() {
       <div className="mx-auto max-w-6xl">
         <div className="flex flex-col items-center space-y-3 md:flex-row md:items-center md:justify-between md:space-y-0">
           <div className="md:mb-0">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600 text-white font-bold text-lg">咕</div>
+            <img src="/logo-nobg.png" alt="咕嘎写作" className="h-12 w-12 rounded-xl" />
           </div>
           <div className="flex flex-col items-center space-y-2 md:flex-row md:space-x-2 md:space-y-0">
             <Link href="/terms" className="text-nowrap text-sm text-zinc-400 hover:text-white">服务条款</Link>
