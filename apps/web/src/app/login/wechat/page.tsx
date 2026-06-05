@@ -1,11 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useAuthStore } from '@/stores/auth'
 import { apiJson } from '@/lib/api'
 
-export default function WechatCallbackPage() {
+function WechatCallbackInner() {
   const searchParams = useSearchParams()
   const [error, setError] = useState('')
   const { setToken } = useAuthStore()
@@ -47,5 +47,13 @@ export default function WechatCallbackPage() {
     <div className="flex min-h-screen items-center justify-center">
       <p className="text-gray-600">微信登录中...</p>
     </div>
+  )
+}
+
+export default function WechatCallbackPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><p className="text-gray-600">加载中...</p></div>}>
+      <WechatCallbackInner />
+    </Suspense>
   )
 }
