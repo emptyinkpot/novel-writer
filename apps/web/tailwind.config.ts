@@ -30,6 +30,22 @@ const config: Config = {
           '0%, 100%': { opacity: '0.4' },
           '50%': { opacity: '1' },
         },
+        'marquee-left': {
+          '0%': { transform: 'translateX(0)' },
+          '100%': { transform: 'translateX(calc(-100% - var(--gap)))' },
+        },
+        'marquee-right': {
+          '0%': { transform: 'translateX(calc(-100% - var(--gap)))' },
+          '100%': { transform: 'translateX(0)' },
+        },
+        sparkle: {
+          '0%, 100%': { opacity: '0', transform: 'scale(0) rotate(0deg)' },
+          '50%': { opacity: '1', transform: 'scale(1) rotate(180deg)' },
+        },
+        'border-beam': {
+          '0%': { offsetDistance: '0%' },
+          '100%': { offsetDistance: '100%' },
+        },
       },
       animation: {
         gradient: 'gradient 8s ease infinite',
@@ -37,6 +53,10 @@ const config: Config = {
         'shimmer-slide': 'shimmer-slide 2s linear infinite',
         'spin-around': 'spin-around 5s linear infinite',
         'beam-pulse': 'beam-pulse 3s ease-in-out infinite',
+        'marquee-left': 'marquee-left var(--duration, 30s) linear infinite',
+        'marquee-right': 'marquee-right var(--duration, 30s) linear infinite',
+        sparkle: 'sparkle 2.5s ease-in-out infinite',
+        'border-beam': 'border-beam 6s linear infinite',
       },
     },
   },
