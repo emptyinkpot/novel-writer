@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import { Sun, Moon } from 'lucide-react'
 import { useState } from 'react'
@@ -28,7 +29,7 @@ export default function Header() {
       <div className="flex w-full items-center justify-between gap-4">
         <div className="flex min-w-0 items-center gap-10">
           <Link href="/" className="flex flex-row items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white font-bold text-sm">咕</div>
+            <Image src="/logo-nobg.png" alt="咕嘎写作" width={36} height={36} className="rounded-xl" />
             <span className="text-lg font-bold text-gray-900 dark:text-zinc-100">咕嘎写作</span>
           </Link>
           <nav className="hidden items-center gap-6 sm:flex">

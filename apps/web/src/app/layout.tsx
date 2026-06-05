@@ -7,6 +7,10 @@ const inter = Inter({ subsets: ['latin'] })
 export const metadata: Metadata = {
   title: '咕嘎写作 - AI 创作平台',
   description: '咕嘎写作 - AI 创作平台',
+  icons: {
+    icon: '/favicon.ico',
+    apple: '/favicon-192.png',
+  },
 }
 
 export default function RootLayout({

@@ -31,7 +31,7 @@ export default function EditorPage() {
       <header className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-2 dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex items-center gap-6">
           <Link href="/" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white font-bold text-xs">咕</div>
+            <img src="/logo-nobg.png" alt="咕嘎写作" className="h-8 w-8 rounded-lg" />
             <span className="text-sm font-bold text-gray-900 dark:text-zinc-100">咕嘎写作</span>
           </Link>
           <nav className="hidden items-center gap-4 sm:flex">
