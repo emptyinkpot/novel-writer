@@ -6,9 +6,11 @@ import { LibraryModule } from './library/library.module';
 import { ChatModule } from './chat/chat.module';
 import { SessionModule } from './session/session.module';
 import { HealthModule } from './health/health.module';
+import { PaymentModule } from './payment/payment.module';
 import { UserEntity } from './user/user.entity';
 import { SessionEntity } from './session/session.entity';
 import { WorkEntity } from './library/work.entity';
+import { OrderEntity } from './payment/order.entity';
 
 @Module({
   imports: [
@@ -19,7 +21,7 @@ import { WorkEntity } from './library/work.entity';
       username: process.env.DB_USER || 'database_content_rw',
       password: process.env.DB_PASS || 'vreDCh386uglGIa05sEx1JO9wcAZyK4W',
       database: process.env.DB_NAME || 'cloudbase-4glvyyq9f61b19cd',
-      entities: [UserEntity, SessionEntity, WorkEntity],
+      entities: [UserEntity, SessionEntity, WorkEntity, OrderEntity],
       synchronize: true,
     }),
     AuthModule,
@@ -28,6 +30,7 @@ import { WorkEntity } from './library/work.entity';
     ChatModule,
     SessionModule,
     HealthModule,
+    PaymentModule,
   ],
 })
 export class AppModule {}
