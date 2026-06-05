@@ -7,10 +7,12 @@ import { ChatModule } from './chat/chat.module';
 import { SessionModule } from './session/session.module';
 import { HealthModule } from './health/health.module';
 import { PaymentModule } from './payment/payment.module';
+import { ChapterModule } from './chapter/chapter.module';
 import { UserEntity } from './user/user.entity';
 import { SessionEntity } from './session/session.entity';
 import { WorkEntity } from './library/work.entity';
 import { OrderEntity } from './payment/order.entity';
+import { ChapterEntity } from './chapter/chapter.entity';
 
 @Module({
   imports: [
@@ -21,7 +23,7 @@ import { OrderEntity } from './payment/order.entity';
       username: process.env.DB_USER || 'database_content_rw',
       password: process.env.DB_PASS || 'vreDCh386uglGIa05sEx1JO9wcAZyK4W',
       database: process.env.DB_NAME || 'cloudbase-4glvyyq9f61b19cd',
-      entities: [UserEntity, SessionEntity, WorkEntity, OrderEntity],
+      entities: [UserEntity, SessionEntity, WorkEntity, OrderEntity, ChapterEntity],
       synchronize: false,
     }),
     AuthModule,
@@ -31,6 +33,7 @@ import { OrderEntity } from './payment/order.entity';
     SessionModule,
     HealthModule,
     PaymentModule,
+    ChapterModule,
   ],
 })
 export class AppModule {}
