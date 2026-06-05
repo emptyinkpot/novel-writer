@@ -22,7 +22,7 @@ import { OrderEntity } from './payment/order.entity';
       password: process.env.DB_PASS || 'vreDCh386uglGIa05sEx1JO9wcAZyK4W',
       database: process.env.DB_NAME || 'cloudbase-4glvyyq9f61b19cd',
       entities: [UserEntity, SessionEntity, WorkEntity, OrderEntity],
-      synchronize: true,
+      synchronize: false,
     }),
     AuthModule,
     UserModule,
