@@ -60,7 +60,7 @@ export default function ChatPanel() {
     let acc = ''
     try {
       await apiStream(
-        '/api/chat/completions',
+        '/api/v1/chat/chat/v2',
         {
           method: 'POST',
           body: {

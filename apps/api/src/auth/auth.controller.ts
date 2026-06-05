@@ -1,4 +1,4 @@
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, Post, Get, Body, Query } from '@nestjs/common';
 import { AuthService } from './auth.service';
 
 @Controller('api/v1/auth')
@@ -8,5 +8,21 @@ export class AuthController {
   @Post('login')
   async login(@Body() body: { email: string; password: string }) {
     return this.authService.login(body.email, body.password);
+  }
+
+  @Post('register')
+  async register(@Body() body: { email: string; password: string; fullName?: string }) {
+    return this.authService.register(body.email, body.password, body.fullName);
+  }
+
+  @Get('wechat/url')
+  getWechatUrl(@Query('state') state?: string) {
+    const url = this.authService.getWechatAuthUrl(state);
+    return { url };
+  }
+
+  @Post('wechat/callback')
+  async wechatCallback(@Body() body: { code: string }) {
+    return this.authService.wechatLogin(body.code);
   }
 }

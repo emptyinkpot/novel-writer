@@ -17,4 +17,13 @@ export class UserService {
   findByEmail(email: string) {
     return this.userRepo.findOneBy({ email });
   }
+
+  save(user: UserEntity) {
+    return this.userRepo.save(user);
+  }
+
+  create(data: Partial<UserEntity>) {
+    const user = this.userRepo.create(data);
+    return this.userRepo.save(user);
+  }
 }

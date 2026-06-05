@@ -1,35 +1,40 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 
 @Entity('works')
 export class WorkEntity {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Index()
-  @Column({ name: 'user_id' })
-  userId: number;
-
-  @Column()
+  @Column({ length: 200 })
   title: string;
 
-  @Column({ nullable: true })
+  @Column({ name: 'alternative_titles', type: 'text', nullable: true })
+  alternativeTitles: string;
+
+  @Column({ type: 'longtext', nullable: true })
   description: string;
 
-  @Column({ nullable: true })
-  genre: string;
+  @Column({ type: 'text', nullable: true })
+  tags: string;
 
-  @Column({ name: 'cover_url', nullable: true })
-  coverUrl: string;
+  @Column({ type: 'text', nullable: true })
+  style: string;
 
-  @Column({ default: 'active' })
+  @Column({ name: 'target_chapters', type: 'int', nullable: true })
+  targetChapters: number;
+
+  @Column({ name: 'current_chapters', type: 'int', default: 0 })
+  currentChapters: number;
+
+  @Column({ length: 50, nullable: true })
   status: string;
 
-  @Column({ type: 'jsonb', nullable: true })
-  metadata: Record<string, any>;
+  @Column({ length: 100, nullable: true })
+  platform: string;
 
-  @CreateDateColumn({ name: 'created_at' })
+  @CreateDateColumn({ name: 'created_at', type: 'datetime' })
   createdAt: Date;
 
-  @UpdateDateColumn({ name: 'updated_at' })
+  @UpdateDateColumn({ name: 'updated_at', type: 'datetime' })
   updatedAt: Date;
 }
