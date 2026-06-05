@@ -17,9 +17,14 @@ export class ChatService {
 
   checkQuota(user: UserEntity) {
     const plan = user.memberPlan;
-    if (!plan) throw new ForbiddenException('no active plan');
+    if (!plan) {
+      // Free tier: 3000 chars daily (no memberPlan needed)
+      return { remaining: 3000, type: 'free_daily' };
+    }
     const packages = plan.wordPackages as any[];
-    if (!packages || !packages.length) throw new ForbiddenException('quota exhausted');
+    if (!packages || !packages.length) {
+      return { remaining: 3000, type: 'free_daily' };
+    }
     const available = packages.find((p: any) => p.remaining > 0);
     if (!available) throw new ForbiddenException('quota exhausted');
     return available;

@@ -10,17 +10,17 @@ export class LibraryService {
     private readonly workRepo: Repository<WorkEntity>,
   ) {}
 
-  listByUser(userId: number) {
-    return this.workRepo.find({ where: { userId }, order: { updatedAt: 'DESC' } });
+  list() {
+    return this.workRepo.find({ order: { updatedAt: 'DESC' } });
   }
 
-  create(userId: number, data: Partial<WorkEntity>) {
-    const work = this.workRepo.create({ ...data, userId });
+  create(data: Partial<WorkEntity>) {
+    const work = this.workRepo.create(data);
     return this.workRepo.save(work);
   }
 
-  async delete(userId: number, workId: number) {
-    await this.workRepo.delete({ id: workId, userId });
+  async delete(workId: number) {
+    await this.workRepo.delete({ id: workId });
     return { id: workId };
   }
 }
