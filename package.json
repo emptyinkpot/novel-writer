@@ -1,5 +1,5 @@
 {
-  "name": "novel-writer",
+  "name": "guga-write",
   "private": true,
   "workspaces": [
     "apps/*",

@@ -28,8 +28,8 @@ export default function Header() {
       <div className="flex w-full items-center justify-between gap-4">
         <div className="flex min-w-0 items-center gap-10">
           <Link href="/" className="flex flex-row items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white font-bold text-sm">N</div>
-            <span className="text-lg font-bold text-gray-900 dark:text-zinc-100">Novel Writer</span>
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white font-bold text-sm">咕</div>
+            <span className="text-lg font-bold text-gray-900 dark:text-zinc-100">咕嘎写作</span>
           </Link>
           <nav className="hidden items-center gap-6 sm:flex">
             {navItems.map((item) => {

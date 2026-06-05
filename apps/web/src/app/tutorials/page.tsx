@@ -5,7 +5,7 @@ import Header from '@/components/layout/Header'
 import Footer from '@/components/layout/Footer'
 
 const tutorials = [
-  { title: '快速入门指南', desc: '5 分钟了解 Novel Writer 的核心功能与基本操作', duration: '5:32' },
+  { title: '快速入门指南', desc: '5 分钟了解咕嘎写作的核心功能与基本操作', duration: '5:32' },
   { title: 'AI 对话生成教程', desc: '掌握高效的对话式写作流程，让 AI 为你快速生成精彩对白', duration: '8:14' },
   { title: '消痕功能详解', desc: '让 AI 生成的文字更具人文温度，降低 AI 痕迹检测率', duration: '6:48' },
   { title: '生成器使用技巧', desc: '10+ 余款生成器的进阶玩法，从书名到细纲一网打尽', duration: '12:05' },

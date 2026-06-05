@@ -2,7 +2,7 @@ import { Play } from 'lucide-react'
 import Link from 'next/link'
 
 const videos = [
-  { title: '快速入门指南', desc: '5 分钟了解 Novel Writer 的核心功能', duration: '5:32' },
+  { title: '快速入门指南', desc: '5 分钟了解咕嘎写作的核心功能', duration: '5:32' },
   { title: 'AI 对话生成教程', desc: '掌握高效的对话式写作流程', duration: '8:14' },
   { title: '消痕功能详解', desc: '让 AI 生成的文字更具人文温度', duration: '6:48' },
   { title: '生成器使用技巧', desc: '10+ 余款生成器的进阶玩法', duration: '12:05' },
@@ -14,7 +14,7 @@ export default function TutorialsSection() {
       <div className="mx-auto max-w-6xl">
         <div className="mb-12 text-center">
           <h2 className="mb-3 text-3xl font-bold text-gray-900 dark:text-zinc-100 md:text-4xl">入门教程</h2>
-          <p className="text-base text-gray-600 dark:text-zinc-400">观看视频教程，快速上手 Novel Writer 的各项功能</p>
+          <p className="text-base text-gray-600 dark:text-zinc-400">观看视频教程，快速上手咕嘎写作的各项功能</p>
         </div>
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {videos.map((v) => (

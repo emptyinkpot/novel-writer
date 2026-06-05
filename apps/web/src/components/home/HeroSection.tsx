@@ -59,7 +59,7 @@ export default function HeroSection() {
           transition={{ duration: 0.7, ease: [0.25, 0.46, 0.45, 0.94] }}
         >
           <h1 className="mb-6 text-6xl font-bold tracking-tight md:text-8xl">
-            <AnimatedGradientText>专业 AI 小说写作平台</AnimatedGradientText>
+            <AnimatedGradientText>AI 驱动的小说创作平台</AnimatedGradientText>
           </h1>
         </motion.div>
 
@@ -69,7 +69,7 @@ export default function HeroSection() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3, duration: 0.6 }}
         >
-          AI 驱动的创作空间，海量优质提示模板，顶尖大模型加持
+          海量优质提示模板，顶尖大模型加持，让创作更高效
         </motion.p>
 
         <motion.div

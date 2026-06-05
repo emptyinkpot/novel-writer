@@ -43,7 +43,7 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-gray-50">
       <div className="w-full max-w-sm space-y-6 rounded-lg bg-white p-8 shadow">
         <h1 className="text-center text-2xl font-bold text-gray-900">
-          登录白梦写作
+          登录咕嘎写作
         </h1>
 
         {error && (
