@@ -1,17 +1,18 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { Check } from 'lucide-react'
 import Header from '@/components/layout/Header'
 import Footer from '@/components/layout/Footer'
+import { apiJson } from '@/lib/api'
 
 type Tab = 'membership' | 'words' | 'credits'
 
 const memberPlans = [
-  { name: '周卡', duration: '7天', original: '59.9', price: '49.99', credits: '500 积分', popular: false },
-  { name: '月卡', duration: '30天', original: '119', price: '89.99', credits: '每月赠送 3,000 积分', popular: true },
-  { name: '季卡', duration: '90天', original: '349', price: '254.99', credits: '每月赠送 3,500 积分', popular: false },
-  { name: '年卡', duration: '365天', original: '999', price: '949.99', credits: '每月赠送 5,000 积分', popular: false },
+  { key: 'weekly', name: '周卡', duration: '7天', original: '59.9', price: '49.99', credits: '500 积分', popular: false },
+  { key: 'monthly', name: '月卡', duration: '30天', original: '119', price: '89.99', credits: '每月赠送 3,000 积分', popular: true },
+  { key: 'quarterly', name: '季卡', duration: '90天', original: '349', price: '254.99', credits: '每月赠送 3,500 积分', popular: false },
+  { key: 'yearly', name: '年卡', duration: '365天', original: '999', price: '949.99', credits: '每月赠送 5,000 积分', popular: false },
 ]
 
 const memberFeatures = ['对话模式: 无限输入输出字数', '会员专属群', '积分可用于: 封面生成、工作流模式、至强模型', '最多一台电脑端 + 一台移动端同时使用']
@@ -30,6 +31,45 @@ const creditPacks = [
 
 export default function PricingPage() {
   const [tab, setTab] = useState<Tab>('membership')
+  const [paying, setPaying] = useState<string | null>(null)
+  const [orderNo, setOrderNo] = useState<string | null>(null)
+  const [payMethod, setPayMethod] = useState<'wechat' | 'alipay'>('wechat')
+  const [showPayDialog, setShowPayDialog] = useState(false)
+  const [payStatus, setPayStatus] = useState<'pending' | 'paid' | 'error'>('pending')
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+  }, [])
+
+  useEffect(() => () => stopPolling(), [stopPolling])
+
+  const handleBuy = async (planType: string) => {
+    setPaying(planType)
+    setPayStatus('pending')
+    try {
+      const res = await apiJson<{ code: number; data: { orderNo: string; paymentUrl: string | null } }>(
+        '/api/v1/payment/create-order',
+        { method: 'POST', body: { planType, payMethod } },
+      )
+      if (res.code === 0) {
+        setOrderNo(res.data.orderNo)
+        setShowPayDialog(true)
+        if (res.data.paymentUrl) {
+          window.open(res.data.paymentUrl, '_blank')
+        }
+        pollRef.current = setInterval(async () => {
+          const s = await apiJson<{ code: number; data: { status: string } }>(
+            `/api/v1/payment/order-status?orderNo=${res.data.orderNo}`,
+          )
+          if (s.data.status === 'paid') { setPayStatus('paid'); stopPolling() }
+        }, 3000)
+      }
+    } catch { setPayStatus('error') }
+    finally { setPaying(null) }
+  }
+
+  const closeDialog = () => { setShowPayDialog(false); stopPolling(); setOrderNo(null) }
 
   return (
     <div className="flex h-screen-dynamic flex-col">
@@ -56,7 +96,7 @@ export default function PricingPage() {
                       <span className="text-xs sm:text-sm text-gray-500 line-through">¥{plan.original}</span>
                       <h3 className="text-2xl sm:text-[28px] md:text-3xl font-bold">¥{plan.price}</h3>
                     </div>
-                    <button className={`w-full h-10 sm:h-11 md:py-6 rounded-md text-sm md:text-base font-semibold flex items-center justify-center ${plan.popular ? 'bg-blue-600 hover:bg-blue-700 shadow-md text-white' : 'bg-black text-white dark:bg-slate-100 dark:text-slate-900'}`}>购买</button>
+                    <button onClick={() => handleBuy(plan.key)} disabled={paying === plan.key} className={`w-full h-10 sm:h-11 md:py-6 rounded-md text-sm md:text-base font-semibold flex items-center justify-center ${plan.popular ? 'bg-blue-600 hover:bg-blue-700 shadow-md text-white' : 'bg-black text-white dark:bg-slate-100 dark:text-slate-900'} disabled:opacity-50`}>{paying === plan.key ? '处理中...' : '购买'}</button>
                     <ul className="mt-3 md:mt-8 space-y-2.5 md:space-y-4 text-xs text-gray-600 dark:text-zinc-400 md:text-sm">
                       {memberFeatures.map((f) => (
                         <li key={f} className="flex gap-x-3 items-start">
@@ -101,9 +141,39 @@ export default function PricingPage() {
             <p className="mt-8 text-center text-sm text-gray-500 dark:text-zinc-500">
               购买即表示同意 <a href="#" className="text-blue-600 underline-offset-4 hover:underline">《虚拟商品购买协议》</a>
             </p>
+            <div className="mt-6 flex items-center justify-center gap-4">
+              <span className="text-sm text-gray-600 dark:text-zinc-400">支付方式:</span>
+              <button onClick={() => setPayMethod('wechat')} className={`rounded-md px-4 py-1.5 text-sm ${payMethod === 'wechat' ? 'bg-green-500 text-white' : 'bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-zinc-300'}`}>微信支付</button>
+              <button onClick={() => setPayMethod('alipay')} className={`rounded-md px-4 py-1.5 text-sm ${payMethod === 'alipay' ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-zinc-300'}`}>支付宝</button>
+            </div>
           </div>
         </section>
       </div>
+      {showPayDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-sm rounded-xl bg-white p-6 dark:bg-zinc-900">
+            <h3 className="mb-4 text-lg font-bold text-gray-800 dark:text-zinc-200">
+              {payStatus === 'paid' ? '支付成功' : payStatus === 'error' ? '支付失败' : '等待支付'}
+            </h3>
+            {payStatus === 'pending' && (
+              <div className="text-center text-sm text-gray-600 dark:text-zinc-400">
+                <p className="mb-2">订单号: {orderNo}</p>
+                <p>请在支付页面完成付款，完成后此处将自动更新...</p>
+                <div className="mt-4 h-1 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-zinc-700">
+                  <div className="h-full w-1/3 animate-pulse rounded-full bg-blue-500" />
+                </div>
+              </div>
+            )}
+            {payStatus === 'paid' && (
+              <p className="text-center text-sm text-green-600">会员已激活</p>
+            )}
+            {payStatus === 'error' && (
+              <p className="text-center text-sm text-red-500">订单创建失败，请重试</p>
+            )}
+            <button onClick={closeDialog} className="mt-6 w-full rounded-md bg-gray-100 py-2 text-sm font-medium text-gray-800 dark:bg-zinc-800 dark:text-zinc-200">关闭</button>
+          </div>
+        </div>
+      )}
       <Footer />
     </div>
   )
