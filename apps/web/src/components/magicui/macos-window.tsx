@@ -9,7 +9,7 @@ interface MacosWindowProps {
   className?: string
 }
 
-export function MacosWindow({ title = 'Novel Writer', children, className }: MacosWindowProps) {
+export function MacosWindow({ title = '咕嘎写作', children, className }: MacosWindowProps) {
   return (
     <div
       className={cn(

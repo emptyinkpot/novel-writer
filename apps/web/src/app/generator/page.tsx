@@ -34,7 +34,7 @@ export default function GeneratorPage() {
       <Header />
       <div className="flex flex-1 flex-col overflow-auto bg-white dark:bg-zinc-900">
         <div className="container mx-auto flex-1 px-3 py-6 sm:px-4 sm:py-8 lg:px-6">
-          <h1 className="mb-3 text-4xl font-extrabold dark:text-zinc-100">Novel Writer 工坊</h1>
+          <h1 className="mb-3 text-4xl font-extrabold dark:text-zinc-100">咕嘎写作工坊</h1>
           <p className="mb-8 text-gray-600 dark:text-zinc-400">AI赋能创作，让灵感永不枯竭</p>
           <div className="mb-4 flex items-center px-2 sm:mb-6">
             <h2 className="text-2xl font-semibold text-slate-900 dark:text-zinc-100 sm:text-3xl lg:text-4xl">实用工具箱</h2>

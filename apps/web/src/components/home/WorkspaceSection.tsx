@@ -99,7 +99,7 @@ export default function WorkspaceSection() {
           viewport={{ once: true, margin: '-100px' }}
           transition={{ duration: 0.7, ease: [0.25, 0.46, 0.45, 0.94] }}
         >
-          <MacosWindow title="Novel Writer  ·  鸿蒙仙路">
+          <MacosWindow title="咕嘎写作  ·  鸿蒙仙路">
             <div ref={containerRef} className="relative grid h-[440px] grid-cols-[15%_55%_30%]">
               <div
                 ref={treeRef}

@@ -20,7 +20,7 @@ export default function FinalCTA() {
       <Particles count={45} color="#a5b4fc" />
       <div className="relative z-10 mx-auto max-w-3xl">
         <h2 className="mb-6 text-4xl font-bold text-white md:text-5xl">
-          <SparklesText text="开始您的创作之旅" sparkleCount={10} />
+          <SparklesText text="开始你的创作之旅" sparkleCount={10} />
         </h2>
         <p className="mb-10 text-base text-zinc-300 md:text-lg">
           加入万名作者的行列，用 AI 释放您的创作潜能
