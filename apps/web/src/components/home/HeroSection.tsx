@@ -59,7 +59,7 @@ export default function HeroSection() {
           transition={{ duration: 0.7, ease: [0.25, 0.46, 0.45, 0.94] }}
         >
           <h1 className="mb-6 text-6xl font-bold tracking-tight md:text-8xl">
-            <AnimatedGradientText>AI 驱动的小说创作平台</AnimatedGradientText>
+            <AnimatedGradientText>我要把精力放在思考上</AnimatedGradientText>
           </h1>
         </motion.div>
 
@@ -154,4 +154,3 @@ export default function HeroSection() {
     </section>
   )
 }
-
