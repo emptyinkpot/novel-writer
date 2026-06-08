@@ -29,15 +29,21 @@ export class WechatService {
   private readonly appId = process.env.WECHAT_APP_ID || '';
   private readonly appSecret = process.env.WECHAT_APP_SECRET || '';
   private readonly redirectUri = process.env.WECHAT_REDIRECT_URI || '';
+  private readonly oauthMode = process.env.WECHAT_OAUTH_MODE || 'mp';
 
   getAuthUrl(state?: string): string {
     const params = new URLSearchParams({
       appid: this.appId,
       redirect_uri: this.redirectUri,
       response_type: 'code',
-      scope: 'snsapi_userinfo',
+      scope: this.oauthMode === 'qrconnect' ? 'snsapi_login' : 'snsapi_userinfo',
       state: state || 'login',
     });
+
+    if (this.oauthMode === 'qrconnect') {
+      return `https://open.weixin.qq.com/connect/qrconnect?${params.toString()}#wechat_redirect`;
+    }
+
     return `https://open.weixin.qq.com/connect/oauth2/authorize?${params.toString()}#wechat_redirect`;
   }
 

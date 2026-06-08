@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { Check } from 'lucide-react'
+import { QRCodeSVG } from 'qrcode.react'
 import Header from '@/components/layout/Header'
 import Footer from '@/components/layout/Footer'
 import { apiJson } from '@/lib/api'
@@ -36,6 +37,9 @@ export default function PricingPage() {
   const [payMethod, setPayMethod] = useState<'wechat' | 'alipay'>('wechat')
   const [showPayDialog, setShowPayDialog] = useState(false)
   const [payStatus, setPayStatus] = useState<'pending' | 'paid' | 'error'>('pending')
+  const [paymentUrl, setPaymentUrl] = useState<string | null>(null)
+  const [paymentMode, setPaymentMode] = useState<'redirect' | 'qrcode' | null>(null)
+  const [payError, setPayError] = useState('')
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const stopPolling = useCallback(() => {
@@ -47,15 +51,20 @@ export default function PricingPage() {
   const handleBuy = async (planType: string) => {
     setPaying(planType)
     setPayStatus('pending')
+    setPayError('')
+    setPaymentUrl(null)
+    setPaymentMode(null)
     try {
-      const res = await apiJson<{ code: number; data: { orderNo: string; paymentUrl: string | null } }>(
+      const res = await apiJson<{ code: number; data: { orderNo: string; paymentUrl: string; paymentMode: 'redirect' | 'qrcode' } }>(
         '/api/v1/payment/create-order',
         { method: 'POST', body: { planType, payMethod } },
       )
       if (res.code === 0) {
         setOrderNo(res.data.orderNo)
+        setPaymentUrl(res.data.paymentUrl)
+        setPaymentMode(res.data.paymentMode)
         setShowPayDialog(true)
-        if (res.data.paymentUrl) {
+        if (res.data.paymentMode === 'redirect') {
           window.open(res.data.paymentUrl, '_blank')
         }
         pollRef.current = setInterval(async () => {
@@ -65,11 +74,15 @@ export default function PricingPage() {
           if (s.data.status === 'paid') { setPayStatus('paid'); stopPolling() }
         }, 3000)
       }
-    } catch { setPayStatus('error') }
+    } catch (err: unknown) {
+      setPayStatus('error')
+      setPayError(err instanceof Error ? err.message : '订单创建失败，请重试')
+      setShowPayDialog(true)
+    }
     finally { setPaying(null) }
   }
 
-  const closeDialog = () => { setShowPayDialog(false); stopPolling(); setOrderNo(null) }
+  const closeDialog = () => { setShowPayDialog(false); stopPolling(); setOrderNo(null); setPaymentUrl(null); setPaymentMode(null); setPayError('') }
 
   return (
     <div className="flex h-screen-dynamic flex-col">
@@ -158,7 +171,16 @@ export default function PricingPage() {
             {payStatus === 'pending' && (
               <div className="text-center text-sm text-gray-600 dark:text-zinc-400">
                 <p className="mb-2">订单号: {orderNo}</p>
-                <p>请在支付页面完成付款，完成后此处将自动更新...</p>
+                {paymentMode === 'qrcode' && paymentUrl ? (
+                  <div className="mb-4 flex flex-col items-center gap-3">
+                    <div className="rounded-lg border border-gray-200 bg-white p-3">
+                      <QRCodeSVG value={paymentUrl} size={220} />
+                    </div>
+                    <p>请使用{payMethod === 'wechat' ? '微信' : '支付宝'}扫码完成付款</p>
+                  </div>
+                ) : (
+                  <p>请在支付页面完成付款，完成后此处将自动更新...</p>
+                )}
                 <div className="mt-4 h-1 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-zinc-700">
                   <div className="h-full w-1/3 animate-pulse rounded-full bg-blue-500" />
                 </div>
@@ -168,7 +190,7 @@ export default function PricingPage() {
               <p className="text-center text-sm text-green-600">会员已激活</p>
             )}
             {payStatus === 'error' && (
-              <p className="text-center text-sm text-red-500">订单创建失败，请重试</p>
+              <p className="text-center text-sm text-red-500">{payError || '订单创建失败，请重试'}</p>
             )}
             <button onClick={closeDialog} className="mt-6 w-full rounded-md bg-gray-100 py-2 text-sm font-medium text-gray-800 dark:bg-zinc-800 dark:text-zinc-200">关闭</button>
           </div>
