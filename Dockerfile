@@ -1,7 +1,9 @@
 FROM node:20-slim AS build
 
 WORKDIR /build
-RUN corepack enable
+ENV npm_config_registry=https://registry.npmmirror.com
+RUN npm install -g pnpm@10.33.0 --registry=https://registry.npmmirror.com \
+  && pnpm config set registry https://registry.npmmirror.com
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY apps/api/package.json ./apps/api/package.json
@@ -24,7 +26,9 @@ ENV WEB_PORT=19200
 ENV INTERNAL_API_URL=http://127.0.0.1:19201
 
 WORKDIR /app
-RUN corepack enable
+ENV npm_config_registry=https://registry.npmmirror.com
+RUN npm install -g pnpm@10.33.0 --registry=https://registry.npmmirror.com \
+  && pnpm config set registry https://registry.npmmirror.com
 
 COPY --from=build /build/package.json /build/pnpm-lock.yaml /build/pnpm-workspace.yaml ./
 COPY --from=build /build/node_modules ./node_modules
