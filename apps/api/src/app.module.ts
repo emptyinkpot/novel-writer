@@ -13,16 +13,17 @@ import { SessionEntity } from './session/session.entity';
 import { WorkEntity } from './library/work.entity';
 import { OrderEntity } from './payment/order.entity';
 import { ChapterEntity } from './chapter/chapter.entity';
+import { requiredEnv } from './env';
 
 @Module({
   imports: [
     TypeOrmModule.forRoot({
       type: 'mysql',
-      host: process.env.DB_HOST || 'SERVER_IP_REMOVED',
-      port: parseInt(process.env.DB_PORT || '22295', 10),
-      username: process.env.DB_USER || 'database_content_rw',
-      password: process.env.DB_PASS || 'vreDCh386uglGIa05sEx1JO9wcAZyK4W',
-      database: process.env.DB_NAME || 'cloudbase-4glvyyq9f61b19cd',
+      host: requiredEnv('DB_HOST'),
+      port: parseInt(requiredEnv('DB_PORT'), 10),
+      username: requiredEnv('DB_USER'),
+      password: requiredEnv('DB_PASS'),
+      database: requiredEnv('DB_NAME'),
       entities: [UserEntity, SessionEntity, WorkEntity, OrderEntity, ChapterEntity],
       synchronize: false,
     }),

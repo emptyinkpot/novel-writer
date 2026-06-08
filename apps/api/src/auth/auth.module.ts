@@ -6,12 +6,13 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
 import { WechatService } from './wechat.service';
 import { UserModule } from '../user/user.module';
+import { requiredEnv } from '../env';
 
 @Module({
   imports: [
     PassportModule,
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'changeme',
+      secret: requiredEnv('JWT_SECRET'),
       signOptions: { expiresIn: '7d' },
     }),
     UserModule,

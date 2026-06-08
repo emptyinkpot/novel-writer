@@ -1,5 +1,6 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
 import { UserEntity } from '../user/user.entity';
+import { requiredEnv } from '../env';
 
 const SYSTEM_PROMPT = [
   '你是一个专业的小说写作助手。',
@@ -12,8 +13,8 @@ const SYSTEM_PROMPT = [
 
 @Injectable()
 export class ChatService {
-  private readonly sub2apiUrl = process.env.SUB2API_URL || 'https://llm.example.invalid/v1';
-  private readonly sub2apiKey = process.env.SUB2API_KEY || '';
+  private readonly sub2apiUrl = requiredEnv('SUB2API_URL').replace(/\/+$/, '');
+  private readonly sub2apiKey = requiredEnv('SUB2API_KEY');
 
   checkQuota(user: UserEntity) {
     const plan = user.memberPlan;

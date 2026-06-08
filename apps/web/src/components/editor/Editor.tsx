@@ -22,7 +22,7 @@ async function streamAI(
   onDelta: (text: string) => void,
   onDone: () => void,
 ) {
-  const base = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:19201'
+  const base = process.env.NEXT_PUBLIC_API_URL || ''
   const res = await fetch(`${base}/api/v1/chat/chat/v2`, {
     method: 'POST',
     headers: {
@@ -88,7 +88,7 @@ export default function Editor() {
     if (!chapter) return
     setSaving(true)
     try {
-      const base = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:19201'
+      const base = process.env.NEXT_PUBLIC_API_URL || ''
       const tk = useAuthStore.getState().token
       await fetch(`${base}/api/v1/chapter/save`, {
         method: 'POST',

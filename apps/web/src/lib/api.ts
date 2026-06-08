@@ -1,7 +1,7 @@
 import { useAuthStore } from '@/stores/auth'
 
 const BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:19201'
+  process.env.NEXT_PUBLIC_API_URL || ''
 
 export interface ApiOptions extends RequestInit {
   body?: any
