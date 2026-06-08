@@ -6,7 +6,7 @@ import { apiJson } from '@/lib/api'
 import { Plus, FileText } from 'lucide-react'
 
 export default function ChapterTree() {
-  const { currentWork, chapters, currentChapter, setChapters, setCurrentChapter } = useEditorStore()
+  const { currentWork, chapters, currentChapter, setChapters, setCurrentChapter, setError } = useEditorStore()
 
   useEffect(() => {
     if (!currentWork) {
@@ -14,18 +14,26 @@ export default function ChapterTree() {
       return
     }
     apiJson<{ data: any[] }>(`/api/v1/chapter/list?workId=${currentWork.id}`)
-      .then((res) => setChapters(res.data))
-      .catch(() => {})
-  }, [currentWork])
+      .then((res) => {
+        setChapters(res.data)
+        setCurrentChapter(res.data[0] || null)
+      })
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : '加载章节失败'))
+  }, [currentWork, setChapters, setCurrentChapter, setError])
 
   const handleNewChapter = async () => {
     if (!currentWork) return
-    const res = await apiJson<{ data: any }>('/api/v1/chapter/save', {
-      method: 'POST',
-      body: { workId: currentWork.id, title: `第${chapters.length + 1}章`, content: '' },
-    })
-    setChapters([...chapters, res.data])
-    setCurrentChapter(res.data)
+    setError(null)
+    try {
+      const res = await apiJson<{ data: any }>('/api/v1/chapter/save', {
+        method: 'POST',
+        body: { workId: currentWork.id, title: `第${chapters.length + 1}章`, content: '' },
+      })
+      setChapters([...chapters, res.data])
+      setCurrentChapter(res.data)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '新建章节失败')
+    }
   }
 
   return (

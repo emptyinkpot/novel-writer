@@ -4,9 +4,12 @@ import Sidebar from '@/components/sidebar/Sidebar'
 import Editor from '@/components/editor/Editor'
 import ChatPanel from '@/components/chat/ChatPanel'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { Sun, Moon, ChevronDown } from 'lucide-react'
-import { useState } from 'react'
+import { usePathname, useRouter } from 'next/navigation'
+import { Sun, Moon } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { apiJson } from '@/lib/api'
+import { useAuthStore } from '@/stores/auth'
+import { useEditorStore, type Work } from '@/stores/editor'
 
 const navItems = [
   { label: '首页', href: '/' },
@@ -19,12 +22,44 @@ const navItems = [
 
 export default function EditorPage() {
   const pathname = usePathname()
+  const router = useRouter()
   const [dark, setDark] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const { token, hydrate } = useAuthStore()
+  const { works, currentWork, setWorks, setCurrentWork, setCurrentChapter, setChapters } = useEditorStore()
 
   const toggleTheme = () => {
     setDark(!dark)
     document.documentElement.classList.toggle('dark')
   }
+
+  useEffect(() => {
+    hydrate()
+  }, [hydrate])
+
+  useEffect(() => {
+    if (!token) {
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    setLoadError('')
+    apiJson<{ code: number; data: Work[] }>('/api/v1/library/work-list')
+      .then((res) => {
+        setWorks(res.data)
+        if (!currentWork && res.data.length > 0) {
+          setCurrentWork(res.data[0])
+        }
+        if (res.data.length === 0) {
+          setCurrentWork(null)
+          setCurrentChapter(null)
+          setChapters([])
+        }
+      })
+      .catch((err: unknown) => setLoadError(err instanceof Error ? err.message : '加载作品失败'))
+      .finally(() => setLoading(false))
+  }, [token, currentWork, setWorks, setCurrentWork, setCurrentChapter, setChapters])
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden">
@@ -49,6 +84,20 @@ export default function EditorPage() {
           </button>
         </div>
       </header>
+      {!token ? (
+        <div className="flex flex-1 items-center justify-center bg-white dark:bg-zinc-950">
+          <div className="text-center">
+            <h1 className="mb-2 text-xl font-semibold text-gray-900 dark:text-zinc-100">登录后进入编辑器</h1>
+            <button onClick={() => router.push('/login')} className="mt-4 rounded-md bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700">去登录</button>
+          </div>
+        </div>
+      ) : loading ? (
+        <div className="flex flex-1 items-center justify-center bg-white text-sm text-gray-500 dark:bg-zinc-950 dark:text-zinc-400">加载作品中...</div>
+      ) : loadError ? (
+        <div className="flex flex-1 items-center justify-center bg-white dark:bg-zinc-950">
+          <div className="max-w-md rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">{loadError}</div>
+        </div>
+      ) : (
       <div className="flex flex-1 overflow-hidden">
         <aside className="w-[15%] min-w-[200px] border-r border-gray-200 bg-gray-50 dark:border-zinc-800 dark:bg-zinc-900">
           <Sidebar />
@@ -60,6 +109,7 @@ export default function EditorPage() {
           <ChatPanel />
         </aside>
       </div>
+      )}
     </div>
   )
 }

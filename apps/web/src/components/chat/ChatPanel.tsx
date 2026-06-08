@@ -102,7 +102,7 @@ export default function ChatPanel() {
       addMessage({
         id: `e-${Date.now()}`,
         role: 'assistant',
-        content: `错误: ${err.message}`,
+        content: `错误: ${err instanceof Error ? err.message : '请求失败'}`,
         createdAt: Date.now(),
       })
     } finally {

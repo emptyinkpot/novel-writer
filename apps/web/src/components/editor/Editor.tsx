@@ -60,7 +60,7 @@ async function streamAI(
 }
 
 export default function Editor() {
-  const { currentChapter, updateChapterContent, setSaving, setAiWriting, aiWriting, saving } = useEditorStore()
+  const { currentChapter, updateChapterContent, setSaving, setAiWriting, aiWriting, saving, error, setError } = useEditorStore()
   const token = useAuthStore((s) => s.token)
   const [wordCount, setWordCount] = useState(0)
   const abortRef = useRef(false)
@@ -87,18 +87,25 @@ export default function Editor() {
     const chapter = useEditorStore.getState().currentChapter
     if (!chapter) return
     setSaving(true)
+    setError(null)
     try {
       const base = process.env.NEXT_PUBLIC_API_URL || ''
       const tk = useAuthStore.getState().token
-      await fetch(`${base}/api/v1/chapter/save`, {
+      const res = await fetch(`${base}/api/v1/chapter/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tk}` },
         body: JSON.stringify({ id: chapter.id, workId: chapter.workId, content: html }),
       })
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(`保存失败: API ${res.status}: ${text}`)
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '保存失败')
     } finally {
       setSaving(false)
     }
-  }, [setSaving])
+  }, [setError, setSaving])
 
   const debouncedSave = useDebounce(saveToServer, 3000)
 
@@ -119,13 +126,17 @@ export default function Editor() {
     const last500 = text.slice(-500)
     const prompt = `你是一位小说写作助手。请根据以下已有内容，自然地续写约200字，保持风格一致：\n\n${last500}`
     setAiWriting(true)
+    setError(null)
     abortRef.current = false
     editor.commands.focus('end')
     await streamAI(token, prompt, (delta) => {
       if (abortRef.current) return
       editor.chain().focus().insertContent(delta).run()
-    }, () => setAiWriting(false)).catch(() => setAiWriting(false))
-  }, [editor, token, aiWriting, setAiWriting])
+    }, () => setAiWriting(false)).catch((err: unknown) => {
+      setError(err instanceof Error ? err.message : 'AI 续写失败')
+      setAiWriting(false)
+    })
+  }, [editor, token, aiWriting, setAiWriting, setError])
 
   const handleBubbleAction = useCallback(async (action: string) => {
     if (!editor || !token || aiWriting) return
@@ -139,13 +150,17 @@ export default function Editor() {
       continue: `续写以下文本，自然延续约100字：\n\n${selected}`,
     }
     setAiWriting(true)
+    setError(null)
     abortRef.current = false
     editor.chain().focus().deleteSelection().run()
     await streamAI(token, prompts[action], (delta) => {
       if (abortRef.current) return
       editor.chain().focus().insertContent(delta).run()
-    }, () => setAiWriting(false)).catch(() => setAiWriting(false))
-  }, [editor, token, aiWriting, setAiWriting])
+    }, () => setAiWriting(false)).catch((err: unknown) => {
+      setError(err instanceof Error ? err.message : 'AI 操作失败')
+      setAiWriting(false)
+    })
+  }, [editor, token, aiWriting, setAiWriting, setError])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -180,6 +195,11 @@ export default function Editor() {
       )}
 
       <div className="flex-1 overflow-y-auto">
+        {error && (
+          <div className="mx-6 mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
+            {error}
+          </div>
+        )}
         <EditorContent editor={editor} className="h-full" />
       </div>
 

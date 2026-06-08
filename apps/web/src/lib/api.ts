@@ -30,6 +30,9 @@ export async function apiClient(path: string, options: ApiOptions = {}) {
 
   if (!res.ok) {
     const text = await res.text()
+    if (res.status === 401) {
+      useAuthStore.getState().signOut()
+    }
     throw new Error(`API ${res.status}: ${text}`)
   }
 

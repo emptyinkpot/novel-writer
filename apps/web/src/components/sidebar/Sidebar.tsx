@@ -2,9 +2,32 @@
 
 import { useEditorStore } from '@/stores/editor'
 import ChapterTree from '@/components/editor/ChapterTree'
+import { apiJson } from '@/lib/api'
+import { useState } from 'react'
 
 export default function Sidebar() {
-  const { works, currentWork, setCurrentWork } = useEditorStore()
+  const { works, currentWork, setCurrentWork, setWorks, setCurrentChapter, setChapters, setError } = useEditorStore()
+  const [creating, setCreating] = useState(false)
+
+  const createWork = async () => {
+    setCreating(true)
+    setError(null)
+    try {
+      const res = await apiJson<{ code: number; data: any }>('/api/v1/library/create-work', {
+        method: 'POST',
+        body: { title: `未命名作品 ${works.length + 1}`, status: 'draft' },
+      })
+      const nextWorks = [res.data, ...works]
+      setWorks(nextWorks)
+      setCurrentWork(res.data)
+      setCurrentChapter(null)
+      setChapters([])
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '新建作品失败')
+    } finally {
+      setCreating(false)
+    }
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -35,8 +58,8 @@ export default function Sidebar() {
         <ChapterTree />
       </div>
       <div className="border-t border-gray-200 p-3 dark:border-zinc-700">
-        <button className="w-full rounded bg-blue-600 px-3 py-2 text-sm text-white transition hover:bg-blue-700">
-          新建作品
+        <button onClick={createWork} disabled={creating} className="w-full rounded bg-blue-600 px-3 py-2 text-sm text-white transition hover:bg-blue-700 disabled:opacity-50">
+          {creating ? '创建中...' : '新建作品'}
         </button>
       </div>
     </div>
