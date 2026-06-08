@@ -1,8 +1,5 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
 import './globals.css'
-
-const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
   title: '咕嘎写作 - AI 创作平台',
@@ -20,7 +17,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-Hans">
-      <body className={inter.className}>{children}</body>
+      <body className="font-sans">{children}</body>
     </html>
   )
 }
