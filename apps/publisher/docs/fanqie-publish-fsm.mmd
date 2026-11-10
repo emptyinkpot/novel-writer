@@ -1,0 +1,120 @@
+%% 番茄发布状态机 + DataBase 边界 · 逻辑流图 (Dynamic view)
+%% 生成 2026-06-02 | 源: fanqie-service/src/{application/publish,infrastructure/database,runtime/locks}/*.ts 实读
+%% 配套 c4-context.mmd(静态拓扑) · 本图回答"一章怎么发出去、谁定发布顺序、失败怎么回退、cookie从哪来"
+%% 铁律(ARCHITECTURE.md): ContentBase=内容/资格/状态真源 · fanqie-service=账号/会话/浏览器/确认证据执行层
+flowchart TB
+
+    %% ===================== ① 调用入口 (ContentBase 编排) =====================
+    subgraph ENTRY["① 调用入口 · ContentBase 编排发布"]
+        direction TB
+        CB["ContentBase<br/>(拥有: 发布资格/发布门/工作流状态/调度)"]
+        SDK["FanqieClient SDK (src/sdk · 稳定边界)"]
+        HTTP["HTTP API :5701 (127.0.0.1)<br/>POST /publish/next-database-chapter<br/>= publish-next-safe 主入口"]
+        CB --> SDK --> HTTP
+    end
+
+    %% ===================== ② 解析发布上下文 (远端定序) =====================
+    subgraph RESOLVE["② 解析上下文 · 远端为发布顺序真源"]
+        direction TB
+        CTX["getPublishContext → 解析 accountId/bookId/localWorkId<br/>(publication_targets 绑定: 本地作品↔番茄账号↔远端book)"]
+        SCAN["scan.syncRemoteChapters(refresh=true)<br/>⭐拉番茄远端真实章节列表"]
+        NEXT["latest = max(远端章节号)<br/>nextChapterNumber = latest + 1<br/>⭐发布顺序由远端定,不是本地猜"]
+        RESOLVECH["resolvePublishChapter(chapterNumber=latest+1)<br/>→ DataBase Gateway 取该章内容(内容真源)"]
+        CTX --> SCAN --> NEXT --> RESOLVECH
+    end
+    HTTP --> CTX
+
+    %% ===================== ③ 校验门 (validate 可选前置) =====================
+    subgraph VAL["③ 校验门 validateDatabaseChapter (可选前置)"]
+        direction TB
+        VCHK{"硬错误?<br/>title空 / content空 / 远端该章已存在"}
+        VWARN["软警告(不拦):<br/>章号≠远端next / DB已有publishedAt"]
+        VERR["❌ valid=false 返回错误<br/>(章号冲突→远端已存在则禁发)"]
+        VCHK -->|有| VERR
+        VCHK -->|无| VWARN
+    end
+
+    %% ===================== ④ 发布任务状态机 (PublishService) =====================
+    subgraph FSM["④ 发布任务状态机 · PublishService.publishChapter"]
+        direction TB
+        VALIN{"输入合法?<br/>account/book/chapter>0/title/content"}
+        E400["❌ 400 invalid_publish_input"]
+        IDEM{"jobId 已存在?<br/>jobId=idempotencyKey ‖ sha256(account+book+chap+title+content)"}
+        CACHED["↩ 返回缓存 job<br/>(succeeded/failed/cancelled → completed=true)<br/>⭐幂等: 同章重复请求不重发"]
+        QUEUED["状态=queued (落 job 存储)"]
+        ASYNC{"waitForCompletion<br/>== false?"}
+        FIREASYNC["↩ 立即返 queued<br/>(后台 runPublishJob)"]
+        RUNNING["状态=running (startedAt)"]
+        VALIN -->|否| E400
+        VALIN -->|是| IDEM
+        IDEM -->|是| CACHED
+        IDEM -->|否| QUEUED --> ASYNC
+        ASYNC -->|是| FIREASYNC
+        ASYNC -->|否| RUNNING
+        FIREASYNC -.后台异步.-> RUNNING
+    end
+    VWARN --> VALIN
+    RESOLVECH --> VALIN
+
+    %% ===================== ⑤ 账号串行锁 + 浏览器驱动执行 =====================
+    subgraph EXEC["⑤ AccountLock 串行 + 浏览器驱动 → 番茄平台"]
+        direction TB
+        LOCK["AccountLock.run(accountId)<br/>⭐同账号串行(共享 profile/cookie/发布状态不能并发)<br/>不同账号互不阻塞 · 前序失败不阻断队列"]
+        COOKIE["浏览器 runtime 取 cookie/会话<br/>⭐只能经 DataBase Gateway(database.example.invalid)<br/>/content/publication/accounts · 禁止直连 MySQL"]
+        DRIVE["FanqiePlatformDriver.publishChapter<br/>Playwright: open_work→upload→submit→check_result"]
+        CONF{"平台确认证据?<br/>result.confirmed<br/>⭐点了提交≠成功,要平台回显确认"}
+        LOCK --> COOKIE --> DRIVE --> CONF
+    end
+    RUNNING --> LOCK
+
+    %% ===================== ⑥ 终态 =====================
+    SUCC["✅ 状态=succeeded<br/>confirmation.confirmed=true"]
+    FAILC["❌ 状态=failed · 'platform confirmation failed'<br/>(驱动跑完但平台没确认)"]
+    FAILX["❌ 状态=failed · error=异常消息<br/>(驱动抛错/Gateway 502/远端章节404)"]
+    DRY["✅ dryRun: succeeded 但 evidence={dryRun:true}<br/>⭐不回写 DataBase"]
+    CONF -->|confirmed=true| SUCC
+    CONF -->|confirmed=false| FAILC
+    CONF -.驱动抛异常.-> FAILX
+
+    %% ===================== ⑦ 回写 DataBase (仅成功) =====================
+    subgraph RECORD["⑦ 回写发布结果 · recordPublishResult"]
+        direction TB
+        RGATE{"status==succeeded<br/>且有 confirmation 且非 dryRun?"}
+        RREC["DataBase Gateway /writes/publication/record-result<br/>observedStatus= confirmed?'published':'submitted'<br/>remotePartId=itemId · publishedAt=confirmedAt"]
+        RSKIP["跳过回写(失败/dryRun 不落库)"]
+        RGATE -->|是| RREC
+        RGATE -->|否| RSKIP
+    end
+    SUCC --> RGATE
+    FAILC --> RSKIP
+    DRY --> RSKIP
+
+    %% ===================== ⑧ 失败语义 (回退/暴露) =====================
+    subgraph ERRSEM["⑧ 失败语义 (显式暴露,不兜底)"]
+        direction LR
+        EUN["502 database_gateway_unavailable<br/>Gateway 挂/没配 URL → 整链停,不静默"]
+        E404["404 remote_chapter_not_found<br/>远端定位不到 itemId"]
+        E422["422 publication_target_inactive<br/>/ context_incomplete"]
+    end
+    COOKIE -.Gateway不可达.-> EUN
+    SCAN -.远端缺章.-> E404
+    CTX -.target停用/缺字段.-> E422
+
+    %% ===================== 样式 =====================
+    classDef err fill:#fef2f2,stroke:#dc2626,color:#7f1d1d,stroke-width:1px;
+    classDef ok fill:#f0fdf4,stroke:#16a34a,color:#14532d,stroke-width:1px;
+    classDef gate fill:#fffbeb,stroke:#d97706,color:#78350f,stroke-width:1px;
+    classDef proc fill:#eff6ff,stroke:#3b82f6,color:#1e3a5f,stroke-width:1px;
+    classDef state fill:#faf5ff,stroke:#9333ea,color:#581c87,stroke-width:1px;
+    class E400,VERR,FAILC,FAILX,EUN,E404,E422 err;
+    class SUCC,DRY,RREC ok;
+    class VCHK,VALIN,IDEM,ASYNC,CONF,RGATE gate;
+    class CB,SDK,HTTP,CTX,SCAN,NEXT,RESOLVECH,VWARN,COOKIE,DRIVE,RREC,RSKIP proc;
+    class QUEUED,RUNNING,CACHED,FIREASYNC,LOCK state;
+    style ENTRY fill:#f8fafc,stroke:#94a3b8;
+    style RESOLVE fill:#ffffff,stroke:#bfdbfe;
+    style VAL fill:#fffdf7,stroke:#fcd34d;
+    style FSM fill:#fdfaff,stroke:#d8b4fe;
+    style EXEC fill:#ffffff,stroke:#bfdbfe;
+    style RECORD fill:#f0fdf4,stroke:#86efac;
+    style ERRSEM fill:#fef2f2,stroke:#fca5a5;

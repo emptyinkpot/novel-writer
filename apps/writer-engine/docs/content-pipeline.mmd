@@ -1,0 +1,249 @@
+%% 内容生产管线流图 · ContentBase 编排 (Dynamic view)
+%% ContentBase = 内容生产管线的信息集散地和编排中枢，与 STORM/RAGFlow 平级独立服务
+%% 四种操作: 写(generate) · 查(经Gateway调RAGFlow) · 润色(polish) · 审计(postprocess+diagnostics)
+%% 本机(E:\My Project\Content-Platform\repos\ContentBase\) = 源码真源 · 雨云机(/srv/contentbase/releases/) = 部署产物
+%% 配套 c4-context.mmd(静态拓扑) · 本图回答"一篇文章怎么生成、事实从哪来、为什么 fail-closed、什么被禁止"
+%% 铁律(README): Corpus→Retrieval→Composition→Writer 之外的都不是合法 runtime · Reality 缺失必须 fail closed,禁止退化成自由发挥
+flowchart TB
+
+    %% ===================== ① 调用入口 =====================
+    subgraph ENTRY["① 调用入口 · novel-factory 别名(同一 runtime,无第二 Writer)"]
+        direction TB
+        CALLER["n8n / ContentAdmin / Dify / Claude"]
+        ROUTE["ContentBase :5111<br/>Host=雨云机(SERVER_IP_REMOVED)<br/>Public=https://contentbase.example.invalid<br/><br/>IN:<br/>POST /api/novel/runtime/jobs (异步)<br/>POST /api/content/runtime/generate/article (同步)<br/>POST /api/content/runtime/polish/article (同步润色)<br/><br/>OUT: STORM · DataBase Gateway · LLM(sub2api)<br/><br/>🚫 RemoteOnly<br/>禁止本地tsx/npm/node-e模拟"]
+        JOBNEW["createRuntimeJob: 校验 capabilityId + topic 必填<br/>状态=queued (落 persistJobs)"]
+        CALLER --> ROUTE --> JOBNEW
+    end
+
+    %% ===================== ② 任务状态机 =====================
+    subgraph JOBFSM["② 任务状态机 · runRuntimeJob"]
+        direction LR
+        JQ["queued"]
+        JR["running (startedAt)"]
+        JS["✅ succeeded (result)"]
+        JF["❌ failed (error)"]
+        JC["⊘ cancelled (POST .../cancel)"]
+        JQ --> JR
+        JR -->|generateArticle 成功| JS
+        JR -->|抛错| JF
+        JQ -.取消.-> JC
+    end
+    JOBNEW --> JQ
+    JR --> GEN
+
+    %% ===================== ③ Retrieval (全部经 DataBase Gateway) =====================
+    subgraph RETR["③ Retrieval · 11层召回+联想展开,全部经 DataBase Gateway(ContentBase 禁止直连 RAGFlow)"]
+        direction TB
+        GEN["generateArticle → buildArticleContextEngine"]
+        GCFG{"DATABASE_GATEWAY_URL<br/>已配置?"}
+        EREAL["Reality: /evidence/search<br/>includeWeb + includeRagflow · 优先长文本≥1200字<br/>⭐事实底座(Web+RAGFlow 经 Gateway)"]
+        ECORP["并行拉语料(非门,缺了不拦):<br/>Literary /content/literature + /search/vector(风格池)<br/>Semantic /semantic/units · Lexicon /vocabulary/search<br/>Structure+Author /creative/style-contract+author-profile"]
+        ASSOC["⭐Association Engine(联想展开)<br/>topic→LLM(haiku)→5-8个跳跃关联词<br/>→ /search/vector 二次检索(每词2chunk)<br/>注入literary channel priority=130<br/>失败=静默跳过,不阻断生成"]
+        GEN --> GCFG
+        GCFG -->|是| EREAL
+        GCFG --> ECORP
+        ECORP --> ASSOC
+    end
+
+    %% ===================== ③-a STORM Research Planner =====================
+    subgraph STORM["③-a STORM Research Planner · POST :8910/research<br/>Host=雨云机(SERVER_IP_REMOVED) · AI_COST=YES(qwen-plus×N)"]
+        direction TB
+        STORMIN["topic+target+genre → POST /research"]
+        STPERSP["Perspective Generation<br/>qwen-plus×1: 生成4个研究视角(角色+focus)"]
+        STINTV["Simulated Interview<br/>qwen-plus×N: 每视角3-5问 检索 RAGFlow + 去重"]
+        STOUTL["Outline Generation<br/>qwen-plus×1: 合成结构化大纲(7章节markdown)"]
+        STOUT["输出: {perspectives, questions, outline, citations, elapsed_ms}"]
+        STORMIN --> STPERSP --> STINTV --> STOUTL --> STOUT
+    end
+    subgraph STORMIMPL["STORM 实现真值 · /srv/storm/(雨云SERVER_IP_REMOVED)"]
+        direction LR
+        STIMPL_RM["ragflow_rm.py<br/>RAGFlow retriever<br/>POST /api/v1/retrieval"]
+        STIMPL_ENG["storm_engine.py<br/>三阶段编排<br/>litellm + drop_params"]
+        STIMPL_SRV["server.py FastAPI<br/>:8910/research /health<br/>uvicorn 单进程"]
+        STIMPL_RM --- STIMPL_ENG --- STIMPL_SRV
+    end
+    GEN -->|"所有文章触发<br/>失败=静默降级到expandResearchQueries"| STORMIN
+    STOUT -->|"questions→替代expandResearchQueries"| EREAL
+    STOUT -->|"outline→structure channel p=200"| COMPOSE
+    STOUT -->|"citations→reality channel p=170"| COMPOSE
+
+    %% ===================== ③-b 11层召回门类明细 =====================
+    subgraph LAYERS["③-b Writer Context Assembly · 11层召回门类(context/context-builder.ts buildWriterPrompt)"]
+        direction TB
+        L01["① Reality Brief<br/>任务形态/字数/用户要求/realityThickness<br/>来源: 请求参数"]
+        L02["② Reality Layer<br/>新闻/事实/来源 · 优先≥1200字全文<br/>来源: /evidence/search (DB+Web+RAGFlow)"]
+        L03["③ Data Layer<br/>数字/机构/时间/价格<br/>来源: /evidence/search 结构化字段"]
+        L04["④ Semantic Organization Layer<br/>叙事原则/tone/结构/词域/比喻域<br/>来源: /creative/style-contract · protocol参数"]
+        L05["⑤ Semantic Layer<br/>历史/典故/结构联想<br/>来源: /semantic/units"]
+        L06["⑥ Allusion Layer<br/>历史比较/典故/观察者材料<br/>来源: /semantic/units + reranker"]
+        L07["⑦ Structure Layer<br/>文章结构/开头/转折/收束样本<br/>来源: /creative/style-contract"]
+        L08["⑧ Style Layer<br/>句法/节奏/段落推进<br/>来源: /search/vector 常驻风格池(16 query):<br/>鲁迅·三岛·内藤·石黑一雄·安德森·白鸟库吉·桑原骘藏·宫崎市定·北一辉·希特勒·墨索里尼·戈培尔·太宰治·坂口安吾·川端康成·夏目漱石<br/>role: stylistic — 风格教师,吸收不引用"]
+        L09["⑨ Poetry / Image Field<br/>公版诗词/意象气息<br/>来源: /content/literature"]
+        L10["⑩ Literary Semantic Layer<br/>句法/意象/观察方式/节奏燃料<br/>来源: /content/literature + /search/vector<br/>role: stylistic — 风格教师,吸收不引用"]
+        L11["⑪ Experience + Author Memory<br/>历史好文/改写经验/作者反馈<br/>来源: /creative/author-profile"]
+    end
+
+    %% ===================== ④ 三道 fail-closed 门禁 =====================
+    subgraph GATES["④ Reality 三道 fail-closed 门禁(非黑即白,不退化)"]
+        direction TB
+        G1{"门1: DATABASE_GATEWAY_URL 缺?"}
+        G2{"门2: assertEvidencePack<br/>EvidencePack 有可用 Reality chunk?"}
+        COMPOSE["Composition: rank→rerank→filter→diverse<br/>composeByBudget(token预算=模型窗口×0.45)<br/>顺序 reality→literary→semantic→lexicon→structure→author"]
+        G3{"门3: post-packing<br/>打包后 reality items ≥ 1?"}
+        WARNTHIN["⚠️ reality<500字: warn 'Writer 须收窄',不拦"]
+        G1 -->|缺| FAILCLOSED
+        G1 -->|有| G2
+        G2 -->|0 chunk| FAILCLOSED
+        G2 -->|有| COMPOSE --> G3
+        G3 -->|0 items| FAILCLOSED
+        G3 -->|≥1| WARNTHIN
+    end
+    EREAL --> G1
+    ECORP -.材料入 Composition.-> COMPOSE
+
+    FAILCLOSED["❌ fail closed (抛错→job=failed)<br/>'Reality required: ...'<br/>⭐禁止 fallback body / 自由发挥散文"]
+
+    %% ===================== ⑤ Writer (单次,禁止重写循环) =====================
+    subgraph WRITE["⑤ Writer · 单次生成"]
+        direction TB
+        SYSPROMPT["System Prompt (model/writer-model.ts WRITER_SYSTEM_PROMPT)<br/>✅ 完整风格协议: 判断在动词里/描写精确到不安/语气冷到骨头<br/>✅ 禁忌清单: 装饰性姓名背书/说白了/序数分层/感伤结尾<br/>✅ 材料协议: REALITY=事实 · LITERARY=化用教师 · AUTHOR=方向<br/>✅ 保真: 事实来源/学者/历史人物/出处必须保留"]
+        PROMPT["按 channel + genre profile 拼最终 user prompt<br/>[EPISODE_PLAN][REALITY][LITERARY][SEMANTIC][LEXICON][STRUCTURE][AUTHOR]"]
+        WCALL["callSingleWriter(system+user prompt)<br/>CONTENTBASE_LLM_* / SUB2API_NOVEL_*<br/>→ 走 sub2api 网关出算力<br/>固定 claude-sonnet-4-6"]
+        WBODY{"返回 body 非空?"}
+        DEAI["body>1000字: applyPostProcessing<br/>profile 控制段落打散<br/>cleanupBlankLines<br/>preserveEntityNames: 不删除人名/出处/人物关系"]
+        AUDIT["Context Ingredient Audit<br/>证明每个 channel 真进了 prompt(不是打分层)"]
+        SYSPROMPT --> WCALL
+        PROMPT --> WCALL --> WBODY
+        WBODY -->|是| DEAI --> AUDIT
+    end
+    COMPOSE -.打包后按channel注入.-> LAYERS
+    LAYERS -.11层拼成最终user prompt.-> PROMPT
+    WARNTHIN --> PROMPT
+    WBODY -.空.-> FAILCLOSED
+
+    %% ===================== ⑤-b Polish (润色管线) =====================
+    subgraph POLISH["⑤-b Polish · 保真润色(不走 Retrieval/Gates)"]
+        direction TB
+        POLIN["POST /api/content/runtime/polish/article<br/>接收: text + preserveNames + preserveStructure"]
+        POLCALL["callSingleWriter(polish system prompt + 原文)<br/>→ sub2api 出算力"]
+        POLPOST["applyPostProcessing<br/>实体名默认保留<br/>preserveStructure=true → 跳过段落打散"]
+        POLOUT["返回: polished text + diagnostics"]
+        POLIN --> POLCALL --> POLPOST --> POLOUT
+    end
+    ROUTE --> POLIN
+
+    %% ===================== ⑥ 结果 + 验收 =====================
+    RESULT["✅ result: draft.body + diagnostics<br/>acceptance: bodyPresent+modelInvocation+evidencePack<br/>referenceCoverage: sources/chunks/citations 计数"]
+    AUDIT --> RESULT
+    RESULT --> JS
+
+    %% ===================== ⑧ RAGFlow 语料灌入 + 内部架构 =====================
+    subgraph RAGFLOW["⑧ RAGFlow v0.25.5 · 语料灌入+解析+向量化"]
+        direction TB
+        subgraph INGEST["灌入模块 · corpus-refill/ragflow_upload.py"]
+            direction LR
+            OLIB["本机 Olib(z-library GUI)<br/>E:\Olib\olib-fluent.exe<br/>4账号×10本/天"]
+            CONVERT["calibre ebook-convert<br/>epub/azw3 → txt<br/>PDF 保留(RAGFlow自带OCR)"]
+            UPLOAD["ragflow_upload.py<br/>SSH隧道 localhost:19380<br/>POST /datasets/{id}/documents<br/>+ POST /datasets/{id}/chunks"]
+            OLIB --> CONVERT --> UPLOAD
+        end
+        subgraph RFCORE["容器集群 · SERVER_IP_REMOVED:9380(ProxyCommand跳124)"]
+            direction TB
+            RFAPI["ragflow-cpu-1: nginx+API+task_executors(--workers=2) mem=6g"]
+            RFMYSQL["mysql-1: document/task/knowledgebase 表"]
+            RFES["es01-1: 全文索引+向量存储"]
+            RFMINIO["minio-1: 文件对象存储(原件)"]
+            RFREDIS["redis-1: 任务队列分发"]
+            RFAPI --> RFMYSQL & RFREDIS & RFES & RFMINIO
+        end
+        subgraph RFPIPE["解析管线(每12页一个子task)"]
+            direction LR
+            OCRLAYOUT["OCR(DeepDOC) → Layout → Chunking"]
+            EMBED["Embedding: DashScope text-embedding-v3<br/>阿里云远程API · 质量第一"]
+            ESINDEX["ES Indexing → 向量可检索"]
+            OCRLAYOUT --> EMBED --> ESINDEX
+        end
+        UPLOAD --> RFAPI
+        RFREDIS --> RFPIPE
+        RFPIPE --> RFES
+        subgraph RFDS["两个 Dataset"]
+            direction LR
+            DSLIT["literary-corpus bdcc99c6...<br/>A+D: 文学/史学/思想"]
+            DSEVI["essay-evidence eb927cf6...<br/>B+C: 制度/政策/事实"]
+        end
+        RFFAIL["故障: OOM→orphan tasks · 修: MySQL重置+API重提交"]
+    end
+    EREAL -."/evidence/search 经 Gateway 查 RAGFlow".-> RFAPI
+
+    %% ===================== ⑨ Writer 测试体系 + 诊断指标 =====================
+    subgraph E2E["⑨ Writer 测试体系 · ContentBase/tests/e2e/<br/>两条路径都打 POST /api/content/runtime/generate/article(Bearer cb-key)·产出 C:/Users/ASUS-KL/Downloads/"]
+        direction TB
+        subgraph E2EPATH["测试怎么跑 · 两条路径"]
+            direction LR
+            PSUITE["手动回归 contentbase-writer-e2e.mjs<br/>20用例6组 · INFRA先跑,失败即中止全套<br/>落 baseline/last-run.json → 与上次比 回归/修复/新增<br/>退出码 0=全过 / 1=有失败 / 2=有回归"]
+            PREGEN["单篇复跑 regenerate-with-diagnostics.mjs '题目' [字数]<br/>单题生成+诊断块 → REGEN_*.md"]
+        end
+        subgraph E2ECASE["20 用例 · 6 组 · 各自通过阈值(指标)"]
+            direction TB
+            C_INFRA["INFRA(1)<br/>015 /healthz=200 且 /=200 (失败中止全套)"]
+            C_NEG["STYLE-(5) 负向禁忌<br/>001 无18禁忌作家名 · 002 无5禁忌套话<br/>003 无6转折/平衡词 · 004 无序数分层<br/>005 末段无感伤词 且 不是A而是B≤1"]
+            C_POS["STYLE+(5) 正向质量<br/>006 结尾由前文材料自然推出且无希望词 · 007 packed literary≥5<br/>018 段落节奏偏差率≥30%(防均匀)<br/>019 锚点密度≥70%(数字/机构/年份段占比)<br/>020 确定性:同题跑2次 字数差≤30%且转折=0且段落差≤3"]
+            C_TOPIC["TOPIC(4) 题材多样<br/>008 十三行金融网→body≥2000且reality≥1<br/>009 萨赫勒 · 010 能剧面具 · 011 当代网文 →body≥2000"]
+            C_EDGE["EDGE(3) 边界<br/>012 目标600→实际400-1500<br/>013 目标6000→body≥5000且续写≥1<br/>014 冷门题(火星高氯酸盐)→fail-closed"]
+            C_ASSOC["ASSOC(2) 联想<br/>016 联想items>0 · 017 联想items≥3"]
+        end
+        subgraph E2EDIAG["每篇文章底部诊断块 · buildDiagnosticsBlock 8类指标"]
+            direction TB
+            DG1["①检索层 raw/packed 6通道计数 + Reality top10 + 联想词 + Literary top5"]
+            DG2["②化用率 提取事实(年份/数字/机构名词)→正文命中→化用率%"]
+            DG3["③文章结构 字数/段/句·均句长·短句<15占比·长句>80占比·均段长·节奏偏差>40%占比"]
+            DG4["④风格特征 首句具象·结尾自然收束·问号·引号对·连接词多样性15选N·自我复述·这字句开头%"]
+            DG5["⑤过拟合风险 重复短语(4-8字≥3次) · 段落均匀度±20%占比(>60%标⚠️模板风险)"]
+            DG6["⑥风格违规 作家名/套话/转折词命中(期望全0)"]
+            DG7["⑦综合评分/100 无违规20+节奏≥30→15+化用>0→15+具象开头15+自然收束15+这字句<10→10+自我复述≤1→10"]
+            DG8["⑧Test verdict PASS/FAIL + reason"]
+        end
+        E2EPROD["产物命名 + 分割规则 · 共享源 tests/e2e/diagnostics.mjs<br/>套件→{ID}_题名.md(ID 001-020全局连续,前缀=组) · 单篇→REGEN_题名.md<br/>safeName=去非中文非\w·截前30字<br/>文件 = 正文 + 诊断块,以 ---## 质量评估 为分割锚(正文上/指标下)"]
+    end
+    RESULT -.验收后跑测试.-> E2E
+    PSUITE --> E2ECASE
+    PREGEN --> E2EDIAG
+    E2ECASE -.每用例生成文都附.-> E2EDIAG
+    E2EDIAG --> E2EPROD
+
+    %% ===================== ⑦ 下游 (发布衔接) =====================
+    subgraph DOWN["⑦ 下游衔接"]
+        direction LR
+        PUBNEXT["→ 番茄发布状态机<br/>(见 fanqie-publish-fsm.mmd)"]
+        ADMIN["ContentAdmin 审阅/落库"]
+    end
+    RESULT -.persist=true.-> PUBNEXT
+    RESULT -.-> ADMIN
+
+    %% ===================== 部署契约 =====================
+    DEVOPS["部署契约:<br/>本机(E:\My Project\Content-Platform\repos\ContentBase\) = 源码真源<br/>雨云机(/srv/contentbase/releases/) = 部署产物<br/><br/>CI/CD: Coolify 4.1.2<br/>Host=server-124(SERVER_IP_REMOVED:8000)<br/>触发: push main → 自动 build+deploy<br/>构建: npm ci → tsc → Nixpacks<br/>部署目标: 雨云机 ContentBase 容器<br/><br/>修改流程: 本机改代码 → push main → Coolify 自动构建部署<br/>🚫 禁止在服务器上直接改源码(热补丁除外，热补丁必须回归本机 commit)"]
+
+    %% ===================== ⑩ 禁止项 (README Runtime Boundary) =====================
+    FORBID["🚫 禁止的 runtime(非法):<br/>fallback body · fallback provider/model · alternate Writer route<br/>detached evaluator/prose police · unbounded revision or rewrite loop<br/>AST repair 当生成 · corpus 当后处理打分 · 隐藏 Dify workflow 逻辑<br/><br/>✅ 允许: canonical Material/Author/Review/Revision/StyleRepair fullchain<br/>🚫 把远程服务当本地源码<br/>🚫 npm install / tsx / node-e 模拟 ContentMRS<br/>🚫 真实管线失败后宣称成功<br/>🚫 用户要求看结果时继续修环境"]
+
+    %% ===================== 样式 =====================
+    classDef err fill:#fef2f2,stroke:#dc2626,color:#7f1d1d,stroke-width:1px;
+    classDef ok fill:#f0fdf4,stroke:#16a34a,color:#14532d,stroke-width:1px;
+    classDef gate fill:#fffbeb,stroke:#d97706,color:#78350f,stroke-width:1px;
+    classDef proc fill:#eff6ff,stroke:#3b82f6,color:#1e3a5f,stroke-width:1px;
+    classDef state fill:#faf5ff,stroke:#9333ea,color:#581c87,stroke-width:1px;
+    classDef forbid fill:#1f2937,stroke:#111827,color:#f9fafb,stroke-width:1px;
+    class FAILCLOSED,JF err;
+    class RESULT,JS,DEAI,AUDIT ok;
+    class GCFG,G1,G2,G3,WBODY gate;
+    class CALLER,ROUTE,JOBNEW,GEN,EREAL,ECORP,COMPOSE,PROMPT,WCALL,PUBNEXT,ADMIN,POLIN,POLCALL proc;
+    class JQ,JR,JC,WARNTHIN state;
+    class FORBID,DEVOPS forbid;
+    style ENTRY fill:#f8fafc,stroke:#94a3b8;
+    style JOBFSM fill:#fdfaff,stroke:#d8b4fe;
+    style RETR fill:#ffffff,stroke:#bfdbfe;
+    style GATES fill:#fffdf7,stroke:#fcd34d;
+    style WRITE fill:#ffffff,stroke:#bfdbfe;
+    style POLISH fill:#f0fdf4,stroke:#86efac;
+    style DOWN fill:#f8fafc,stroke:#cbd5e1;
+    style RAGFLOW fill:#fefce8,stroke:#ca8a04;

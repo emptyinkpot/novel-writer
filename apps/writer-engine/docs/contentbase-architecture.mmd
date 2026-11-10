@@ -1,0 +1,55 @@
+%% ContentBase 程序内部调用图 (2026-06-07)
+%% 描述 server.mjs 入口 → 各模块间的调用关系 → 外部依赖
+flowchart TB
+
+    subgraph HTTP["HTTP 入口层 · server.mjs :5111"]
+        direction LR
+        GEN["/api/content/runtime/generate/article"]
+        POL["/api/content/runtime/polish/article"]
+        JOBS["/api/novel/runtime/jobs"]
+        DIAG["/api/corpus/diagnostics"]
+    end
+
+    subgraph ENGINE["生成引擎 · product/novel/src/"]
+        direction TB
+        CTX["context/context-builder.ts<br/>11层RAG召回 + Composition"]
+        MRT["model/writer-model.ts<br/>WRITER_SYSTEM_PROMPT + callSingleWriter"]
+        PP["postprocess/index.ts<br/>preserveEntityNames + breakUniformParagraphs"]
+        CFG["config.ts<br/>RETRIEVAL_LIMITS / RAGFLOW_DATASET_IDS / 通用默认长度(不分体裁)"]
+        RRK["reranker.ts<br/>DashScope Reranker 重排"]
+        STORM["clients/storm-client.ts<br/>STORM Research Planner"]
+        GW["clients/database-gateway-client.ts<br/>DataBase Gateway HTTP 客户端"]
+        ENV["env.ts<br/>环境变量解析"]
+    end
+
+    subgraph EXTERNAL["外部依赖 (HTTP)"]
+        direction LR
+        DGW["DataBase Gateway :18090<br/>事实/风格/语义检索"]
+        SUB["sub2api<br/>Claude sonnet LLM"]
+        STORMAPI["STORM :8910<br/>研究规划"]
+        DASH["DashScope<br/>Reranker API"]
+    end
+
+    %% HTTP → ENGINE
+    GEN --> CTX
+    GEN --> MRT
+    GEN --> PP
+    POL --> MRT
+    POL --> PP
+    JOBS --> CTX
+    JOBS --> MRT
+    DIAG --> GW
+
+    %% ENGINE 内部调用
+    CTX --> GW
+    CTX --> STORM
+    CTX --> RRK
+    CTX --> CFG
+    CTX --> ENV
+    MRT --> ENV
+
+    %% ENGINE → EXTERNAL
+    GW --> DGW
+    MRT --> SUB
+    STORM --> STORMAPI
+    RRK --> DASH
