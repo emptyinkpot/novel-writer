@@ -19,7 +19,7 @@ import { ScriptFanqiePlatformDriver } from '../src/drivers/fanqie/ScriptFanqiePl
 import { InMemoryPublishJobRepository } from '../src/runtime/queue/InMemoryPublishJobRepository.js';
 import { AccountLock } from '../src/runtime/locks/AccountLock.js';
 import { HttpFanqieClient } from '../src/sdk/client.js';
-import type { DataBasePublicationClient } from '../src/infrastructure/database/DataBasePublicationClient.js';
+import type { LocalPublicationStore } from '../src/infrastructure/local/LocalPublicationStore.js';
 import type {
   EditChapterResult,
   EditRemoteChapterInput,
@@ -234,7 +234,7 @@ test('account login discovery does not require a preselected account id', async 
   }
 });
 
-function createFakeDatabaseClient(): DataBasePublicationClient {
+function createFakeDatabaseClient(): LocalPublicationStore {
   const records: any[] = [];
   return {
     records,
@@ -351,7 +351,7 @@ function createFakeDatabaseClient(): DataBasePublicationClient {
       createdAt: new Date(0).toISOString(),
       updatedAt: new Date(0).toISOString(),
     }],
-  } as unknown as DataBasePublicationClient;
+  } as unknown as LocalPublicationStore;
 }
 
 function createFakeReaderService(): PublicReaderService {
@@ -860,7 +860,7 @@ test('default container wires the real script Playwright driver', async () => {
   }
 });
 
-test('script driver reaches runtime scripts through DataBase Gateway account resolution', async () => {
+test('script driver reaches runtime scripts through local account resolution', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'fanqie-script-driver-test-'));
   try {
     const driver = new ScriptFanqiePlatformDriver({
@@ -871,10 +871,9 @@ test('script driver reaches runtime scripts through DataBase Gateway account res
       version: 'test',
     });
 
-    await assert.rejects(
-      () => driver.checkSession('missing_account'),
-      /DataBase Gateway|未从 DataBase 找到番茄账号配置/,
-    );
+    const session = await driver.checkSession('missing_account');
+    assert.equal(session.status, 'missing');
+    assert.equal(session.valid, false);
     await assert.rejects(
       () => driver.publishChapter({
         accountId: 'missing_account',
@@ -883,7 +882,7 @@ test('script driver reaches runtime scripts through DataBase Gateway account res
         title: '第一章',
         content: '正文内容',
       }),
-      /DataBase Gateway|未从 DataBase 找到番茄账号配置/,
+      /本地没有番茄账号/,
     );
   } finally {
     await rm(dataDir, { recursive: true, force: true });

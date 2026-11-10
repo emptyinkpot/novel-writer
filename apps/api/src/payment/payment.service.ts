@@ -184,7 +184,7 @@ export class PaymentService {
     const privateKey = process.env.ALIPAY_PRIVATE_KEY;
     const gateway = process.env.ALIPAY_GATEWAY || 'https://openapi.alipay.com/gateway.do';
     const notifyUrl = process.env.ALIPAY_NOTIFY_URL || this.absoluteApiUrl('/api/v1/payment/notify/alipay');
-    const returnUrl = process.env.ALIPAY_RETURN_URL || process.env.FRONTEND_URL || process.env.APP_URL || 'https://writer.example.invalid/pricing';
+    const returnUrl = process.env.ALIPAY_RETURN_URL || process.env.FRONTEND_URL || process.env.APP_URL || 'http://localhost:19200/pricing';
     if (!appId || !privateKey || !notifyUrl || !returnUrl) {
       throw new ServiceUnavailableException('alipay is not configured');
     }
@@ -215,7 +215,7 @@ export class PaymentService {
     const base = process.env.API_PUBLIC_URL
       || process.env.APP_URL
       || process.env.FRONTEND_URL
-      || 'https://writer.example.invalid';
+      || 'http://localhost:19200';
     return `${base.replace(/\/$/, '')}${path}`;
   }
 

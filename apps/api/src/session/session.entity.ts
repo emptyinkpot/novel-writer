@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import { columnTypes } from '../env';
 
 @Entity('nw_sessions')
 export class SessionEntity {
@@ -15,7 +16,7 @@ export class SessionEntity {
   @Column({ length: 64, default: 'gpt-4o' })
   model: string;
 
-  @Column({ type: 'json', nullable: true })
+  @Column({ type: columnTypes.json, nullable: true })
   messages: any[];
 
   @Column({ name: 'work_id', type: 'int', nullable: true })

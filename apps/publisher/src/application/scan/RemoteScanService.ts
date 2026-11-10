@@ -1,12 +1,12 @@
 import type { FanqiePlatformDriver } from '../../drivers/fanqie/FanqiePlatformDriver.js';
-import type { DataBasePublicationClient } from '../../infrastructure/database/DataBasePublicationClient.js';
+import type { LocalPublicationStore } from '../../infrastructure/local/LocalPublicationStore.js';
 import type { AccountLock } from '../../runtime/locks/AccountLock.js';
 import type { RemoteChapterSnapshot, ScanWorksInput, SyncRemoteChaptersInput } from '../../sdk/types.js';
 
 export class RemoteScanService {
   constructor(
     private readonly driver: FanqiePlatformDriver,
-    private readonly database: DataBasePublicationClient,
+    private readonly database: LocalPublicationStore,
     private readonly accountLock?: AccountLock,
   ) {}
 

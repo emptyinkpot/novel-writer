@@ -9,6 +9,7 @@ import type {
   RemoteChapterSnapshot,
   RemoteWorkSnapshot,
   ScanWorksInput,
+  SessionCheckOptions,
   SessionCheckResult,
   SyncRemoteChaptersInput,
 } from '../../sdk/types.js';
@@ -19,7 +20,7 @@ export interface FanqiePlatformDriver {
   readonly name: string;
   login(accountId: string, options?: LoginOptions): Promise<LoginResult>;
   loginDiscovered(): Promise<LoginResult>;
-  checkSession(accountId: string): Promise<SessionCheckResult>;
+  checkSession(accountId: string, options?: SessionCheckOptions): Promise<SessionCheckResult>;
   scanWorks(input: ScanWorksInput): Promise<RemoteWorkSnapshot[]>;
   syncRemoteChapters(input: SyncRemoteChaptersInput): Promise<RemoteChapterSnapshot[]>;
   publishChapter(input: PublishChapterInput): Promise<PlatformConfirmationEvidence>;

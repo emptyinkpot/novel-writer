@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { columnTypes } from '../env';
 
 @Entity('works')
 export class WorkEntity {
@@ -11,7 +12,7 @@ export class WorkEntity {
   @Column({ name: 'alternative_titles', type: 'text', nullable: true })
   alternativeTitles: string;
 
-  @Column({ type: 'longtext', nullable: true })
+  @Column({ type: columnTypes.longText, nullable: true })
   description: string;
 
   @Column({ type: 'text', nullable: true })

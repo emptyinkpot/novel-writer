@@ -4,10 +4,10 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { chromium } from 'playwright';
-import { createRuntimeDatabaseClient } from './database-gateway-bridge.mjs';
+import { createRuntimeDatabaseClient, findRepoRoot, resolveDataDir } from './local-store.mjs';
 
 // 浏览器脚本的共享 runtime 工具。
-// 这里统一负责：读取 DataBase 连接配置、解析番茄账号、定位浏览器、
+// 这里统一负责：解析番茄账号（本地 data/publisher.sqlite）、定位浏览器、
 // 管理 profile 锁、注入/回写 cookie、采集后台页面证据。
 export function readJsonFile(filePath, fallback = null) { // defensive-code-allow: external Fanqie/DataBase/browser boundary contract.
   if (!filePath || !fs.existsSync(filePath)) return fallback; // defensive-code-allow: external Fanqie/DataBase/browser boundary contract.
@@ -41,43 +41,19 @@ let defaultEnvLoaded = false;
 export function loadDefaultRuntimeEnv() {
   if (defaultEnvLoaded) return;
   defaultEnvLoaded = true;
-  const projectConfig = readDataBaseProjectConfig();
-  // runtime 脚本由 API driver 拉起，必须和 TypeScript 服务发现同一套
-  // DataBase Gateway 配置。cookie 通过 Gateway 读取并回写，不作为本地文件注册表。
-  const candidates = [
-    process.env.FANQIE_DATABASE_ENV_FILE,
-    process.env.DATABASE_SERVICE_USERS_ENV,
-    ...(Array.isArray(projectConfig?.secretSurfaces) ? projectConfig.secretSurfaces : []), // defensive-code-allow: external Fanqie/DataBase/browser boundary contract.
-  ].filter(Boolean);
-  for (const candidate of candidates) {
-    if (!String(candidate).endsWith('.cnf')) loadEnvFile(candidate);
-  }
+  // 项目只认识自己：只读取仓库根目录的 .env。
+  loadEnvFile(path.join(findRepoRoot(), '.env'));
 }
 
-function readDataBaseProjectConfig() {
-  // 兼容从 fanqie-service 仓库或相邻 DataBase 仓库启动的场景；
-  // project.json 只用于发现 secret/env 文件位置，不作为业务真源。
-  const explicitRoot = process.env.DATABASE_PROJECT_ROOT || process.env.FANQIE_DATABASE_PROJECT_ROOT;
-  const candidates = [
-    explicitRoot ? path.resolve(explicitRoot, 'project.json') : '',
-    path.resolve(process.cwd(), '..', 'DataBase', 'project.json'),
-    path.resolve(path.dirname(process.cwd()), 'DataBase', 'project.json'),
-  ].filter(Boolean);
-  for (const candidate of candidates) {
-    if (!fs.existsSync(candidate)) continue;
-    try {
-      return JSON.parse(fs.readFileSync(candidate, 'utf8'));
-    } catch {
-      return null;
-    }
-  }
-  return null;
+/** publisher 运行时数据目录（profile、证据、截图）。 */
+export function defaultServiceDataDir() {
+  return process.env.FANQIE_SERVICE_DATA_DIR || path.join(resolveDataDir(), 'publisher');
 }
 
 function runtimeBrowserDirForAccount(accountId) {
   // profile 目录按账号隔离，避免多个番茄账号共用同一浏览器状态。
   const baseDir = process.env.FANQIE_RUNTIME_BROWSER_ROOT
-    || path.join(os.tmpdir(), 'fanqie-service-browser');
+    || path.join(defaultServiceDataDir(), 'browser-profiles');
   return path.join(baseDir, sanitizeLocalPart(accountId));
 }
 
@@ -115,7 +91,7 @@ function parseCookiePayload(value) {
 }
 
 export async function resolveDatabaseAccount({ accountId }) {
-  // 账号和 session cookie 的 canonical owner 是 DataBase；
+  // 账号和 session cookie 存在本地 data/publisher.sqlite；
   // 浏览器 profile 只是运行时缓存，不能反向成为账号真源。
   loadDefaultRuntimeEnv();
   const payload = await createRuntimeDatabaseClient().publication.accounts({ limit: 500 });
@@ -123,6 +99,7 @@ export async function resolveDatabaseAccount({ accountId }) {
   const row = accountId
     ? accounts.find((item) => String(item?.accountId || item?.id || '') === String(accountId)) // defensive-code-allow: external Fanqie/DataBase/browser boundary contract.
     : accounts[0];
+  // 账号只由登录流程（recordFanqieAccountSession）建档。
   if (!row?.accountId && !row?.id) return null; // defensive-code-allow: external Fanqie/DataBase/browser boundary contract.
   const id = String(row.accountId || row.id);
   const session = row.session && typeof row.session === 'object' ? row.session : {};
@@ -136,13 +113,13 @@ export async function resolveDatabaseAccount({ accountId }) {
     cookieChecksum: row.cookieChecksum ? String(row.cookieChecksum) : null,
     expectedCookieCount: Number.isFinite(Number(session.cookieCount)) ? Number(session.cookieCount) : null,
     sessionSyncedAt: session.syncedAt ? new Date(session.syncedAt).toISOString() : null,
-    accountSource: 'database-gateway',
+    accountSource: 'local',
   };
 }
 
 export async function resolveAccount(optionsOrConfig, projectsRoot, requestedId) {
   // 旧签名仍由调用方传入 projectsRoot/requestedId 时转成对象形态；
-  // 最终仍只从 DataBase resolve 账号。
+  // 最终仍只从 本地存储 resolve 账号。
   const options = projectsRoot
     ? {
       dataDir: process.env.FANQIE_SERVICE_DATA_DIR || path.join(projectsRoot, '.runtime', 'fanqie-service'),
@@ -153,7 +130,7 @@ export async function resolveAccount(optionsOrConfig, projectsRoot, requestedId)
     : optionsOrConfig;
   const account = await resolveDatabaseAccount(options);
   if (!account) {
-    throw new Error(`未从 DataBase 找到番茄账号配置: ${options.accountId || '(default)'}`);
+    throw new Error(`本地没有番茄账号: ${options.accountId || '(default)'}，需要先完成一次番茄登录`);
   }
   return account;
 }
@@ -195,7 +172,8 @@ export function ensureHeadfulSupported() { // defensive-code-allow: external Fan
 
 export function getAcceptanceDir(rootDir) {
   // acceptance 目录保存状态 JSON 和截图，作为浏览器执行证据。
-  return path.join(rootDir, '.runtime', 'acceptance', 'fanqie');
+  // 统一放在 data/publisher/acceptance，rootDir 参数保留兼容旧调用。
+  return path.join(defaultServiceDataDir(), 'acceptance');
 }
 
 export function cleanBrowserLocks(browserDir) {
@@ -301,9 +279,9 @@ export function inspectLocalAccountState(account) {
 }
 
 export async function hydrateContextFromCookieBackup(context, account) {
-  // 打开浏览器后把 DataBase cookie 注入 context，避免依赖本地 profile 是否还在。
+  // 打开浏览器后把 本地存储 cookie 注入 context，避免依赖本地 profile 是否还在。
   // 但只补磁盘 profile 缺失的；磁盘里已有的（通常是用户刚登录留下的新 cookie）必须保留，
-  // 否则会用 DataBase 旧 cookie 覆盖新 cookie，导致登录态被刷回过期状态。
+  // 否则会用 本地存储 旧 cookie 覆盖新 cookie，导致登录态被刷回过期状态。
   const backup = cookiesForAccount(account);
   if (!backup.length) return 0;
   const existing = await context.cookies().catch(() => []);
@@ -322,7 +300,7 @@ export async function hydrateContextFromCookieBackup(context, account) {
 }
 
 function cookieChecksum(cookies) {
-  // checksum 用于 DataBase 侧判断 cookie 内容是否变化。
+  // checksum 用于 本地存储 侧判断 cookie 内容是否变化。
   return createHash('sha256').update(JSON.stringify(cookies || [])).digest('hex'); // defensive-code-allow: external Fanqie/DataBase/browser boundary contract.
 }
 
@@ -355,7 +333,7 @@ function createCookiePayload(account, cookies) {
 }
 
 export async function persistDatabaseCookies(account, cookies) {
-  // 登录态采集成功后，把浏览器 context 中的新 cookie 回写到 DataBase。
+  // 登录态采集成功后，把浏览器 context 中的新 cookie 回写到 本地存储。
   const payload = createCookiePayload(account, cookies);
   const checksum = cookieChecksum(cookies);
   const input = {
@@ -385,7 +363,7 @@ export async function persistDatabaseCookies(account, cookies) {
 }
 
 export async function persistContextCookies(context, account) {
-  // 只收集番茄和头条 SSO 域名下的 cookie，避免把无关浏览器状态写入 DataBase。
+  // 只收集番茄和头条 SSO 域名下的 cookie，避免把无关浏览器状态写入 本地存储。
   const cookies = await context.cookies([
     'https://fanqienovel.com',
     'https://fanqienovel.com/main/writer/book-manage',

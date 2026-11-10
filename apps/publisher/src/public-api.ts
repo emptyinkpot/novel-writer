@@ -6,7 +6,7 @@ export { RemoteScanService } from './application/scan/RemoteScanService.js';
 export { PublishService } from './application/publish/PublishService.js';
 export { EditService } from './application/edit/EditService.js';
 export { PublicReaderService } from './application/reader/PublicReaderService.js';
-export { DataBasePublicationClient } from './infrastructure/database/DataBasePublicationClient.js';
+export { LocalPublicationStore } from './infrastructure/local/LocalPublicationStore.js';
 export { FanqiePublicReaderClient } from './infrastructure/reader/FanqiePublicReaderClient.js';
 export { InMemoryPublishJobRepository } from './runtime/queue/InMemoryPublishJobRepository.js';
 export { NotConfiguredFanqiePlatformDriver } from './drivers/fanqie/FanqiePlatformDriver.js';

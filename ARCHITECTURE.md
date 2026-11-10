@@ -1,36 +1,53 @@
 # 咕嘎写作架构
 
-## 部署模型
+## 原则：项目只认识自己
 
-- 源码真源：GitHub `emptyinkpot/novel-writer` 的 `main` 分支。
-- 生产构建：Coolify 4.1.2 按仓库根 `Dockerfile` 构建镜像。
-- 生产运行：Coolify 应用注入 `.env`，容器内同时运行 Next.js web 和 NestJS API。
-- 公网入口：`writer.example.invalid` 指向 Coolify 管理的 web 端口 `19200`。
-- 内部 API：浏览器只访问同域 `/api/*`，Next.js rewrite 转发到容器内 `http://127.0.0.1:19201/api/*`。
-- 密钥边界：数据库、JWT、sub2api、支付和微信参数只允许由 Coolify env 注入，不写入仓库。
+- 从一份全新的 clone 出发，`pnpm install && pnpm -r run build` 之后就能在本地跑，不依赖任何外部服务。
+- 所有外部端点（模型接口、MySQL、支付、微信）都是**可选**环境变量；缺省时退回仓库内的本地实现，或者该功能明确报「未配置」，不影响其余部分启动。
+- 运行时数据统一放在仓库根目录 `data/`（已 gitignore），整个目录拷走即完成搬迁。可用 `NOVEL_WRITER_DATA_DIR` 改位置。
+- 配置只读仓库根目录的 `.env`（可选，已 gitignore）。
 
-## 端口
+## 组件
 
-| 组件 | 端口 | 可见性 |
+| 包 | 作用 | 端口 |
 | --- | --- | --- |
-| Next.js web | `19200` | Coolify 暴露 |
-| NestJS API | `19201` | 容器内本地访问 |
+| `apps/web` | Next.js 前端，`/api/*` rewrite 到 API | 19200 |
+| `apps/api` | NestJS API：账号、作品、章节、对话、支付 | 19201 |
+| `apps/publisher` | 番茄发布服务：账号登录态、作品扫描、章节发布与编辑 | 19202 |
+| `apps/writer-engine` | 文章 agent 流水线（迁自 ContentBase） | — |
+| `packages/shared` | 共享类型 | — |
 
-## 必需环境变量
+## 本地数据
 
-API 启动必须具备：
+| 文件 | 内容 |
+| --- | --- |
+| `data/novel-writer.sqlite` | API 的用户、作品、章节、会话、订单（未设置 `DB_HOST` 时使用） |
+| `data/.jwt-secret` | 未设置 `JWT_SECRET` 时自动生成，重启后登录态不丢 |
+| `data/publisher.sqlite` | 番茄账号与 cookie、发布目标、远端作品/章节快照、发布记录 |
+| `data/publisher/` | 番茄浏览器 profile、验收截图 |
 
-```text
-DB_HOST
-DB_PORT
-DB_USER
-DB_PASS
-DB_NAME
-JWT_SECRET
-SUB2API_URL
-SUB2API_KEY
-WECHAT_REDIRECT_URI
-PAYMENT_NOTIFY_BASE_URL
-```
+publisher 读取 `data/novel-writer.sqlite` 的 `nw_chapters` 作为待发布章节来源（只读）。
 
-`NEXT_PUBLIC_API_URL` 默认不设置。生产通过同域 `/api/*` 调 API，避免浏览器直连内部 API 端口。
+## 可选环境变量
+
+| 变量 | 作用 |
+| --- | --- |
+| `LLM_BASE_URL` / `LLM_API_KEY` | OpenAI 兼容模型接口。未设置时对话接口返回 503「未配置模型接口」 |
+| `DB_HOST` `DB_PORT` `DB_USER` `DB_PASS` `DB_NAME` | 设置 `DB_HOST` 后 API 改用 MySQL（表结构见 `apps/api/init.sql`） |
+| `JWT_SECRET` | 覆盖自动生成的 JWT 密钥 |
+| `APP_URL` / `API_PUBLIC_URL` | 支付回调和跳转使用的外部地址，默认 `http://localhost:19200` |
+| `WECHAT_*` / `ALIPAY_*` | 微信登录与支付；未设置时对应接口返回「未配置」 |
+| `FANQIE_AUTO_RELOGIN` | `0` 关闭番茄自动登录（默认开启） |
+| `FANQIE_SESSION_CACHE_MINUTES` | 番茄登录态校验通过后的缓存时间，默认 10 |
+| `FANQIE_SESSION_WATCH_MINUTES` | 后台巡检间隔，默认 180，`0` 关闭 |
+| `FANQIE_LOGIN_TIMEOUT_MS` | 等待人工登录的超时，默认 10 分钟 |
+
+## 番茄登录态
+
+publisher 的所有需要登录的操作（扫描、同步章节、发布、读取/编辑远端章节）都经过 `SessionGuardedFanqieDriver`：
+
+1. 执行前快速检查（headless，不弹窗，结果缓存 10 分钟）。
+2. 判定为过期（页面被重定向到登录页）时，打开番茄登录窗口；轮询 profile cookie，检测到新的登录态后校验 uid 与原账号一致，写回 `data/publisher.sqlite` 并自动关窗；再用页面检查确认可用，然后执行任务。
+3. 执行中失败时复查登录态，确认是过期导致的才重新登录并**重试一次**；其他失败原样返回。
+4. 网络错误等无法判定的情况不会触发登录；同一账号同时只开一个登录窗口；登录取消、超时、换了别的番茄账号都会让任务失败并说明原因。
+5. 后台巡检只更新状态（`GET /sessions/state`），从不弹窗。

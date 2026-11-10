@@ -13,20 +13,32 @@ import { SessionEntity } from './session/session.entity';
 import { WorkEntity } from './library/work.entity';
 import { OrderEntity } from './payment/order.entity';
 import { ChapterEntity } from './chapter/chapter.entity';
-import { requiredEnv } from './env';
+import { DATA_DIR, USE_MYSQL, requiredEnv } from './env';
+import { resolve } from 'path';
+
+const ENTITIES = [UserEntity, SessionEntity, WorkEntity, OrderEntity, ChapterEntity];
 
 @Module({
   imports: [
-    TypeOrmModule.forRoot({
-      type: 'mysql',
-      host: requiredEnv('DB_HOST'),
-      port: parseInt(requiredEnv('DB_PORT'), 10),
-      username: requiredEnv('DB_USER'),
-      password: requiredEnv('DB_PASS'),
-      database: requiredEnv('DB_NAME'),
-      entities: [UserEntity, SessionEntity, WorkEntity, OrderEntity, ChapterEntity],
-      synchronize: false,
-    }),
+    TypeOrmModule.forRoot(
+      USE_MYSQL
+        ? {
+            type: 'mysql',
+            host: requiredEnv('DB_HOST'),
+            port: parseInt(process.env.DB_PORT || '3306', 10),
+            username: requiredEnv('DB_USER'),
+            password: requiredEnv('DB_PASS'),
+            database: requiredEnv('DB_NAME'),
+            entities: ENTITIES,
+            synchronize: false,
+          }
+        : {
+            type: 'better-sqlite3',
+            database: resolve(DATA_DIR, 'novel-writer.sqlite'),
+            entities: ENTITIES,
+            synchronize: true,
+          },
+    ),
     AuthModule,
     UserModule,
     LibraryModule,

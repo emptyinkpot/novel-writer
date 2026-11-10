@@ -1,6 +1,6 @@
 import type { EditService } from '../edit/EditService.js';
 import type { RemoteScanService } from '../scan/RemoteScanService.js';
-import type { DataBasePublicationClient } from '../../infrastructure/database/DataBasePublicationClient.js';
+import type { LocalPublicationStore } from '../../infrastructure/local/LocalPublicationStore.js';
 import { FanqieServiceError } from '../../sdk/errors.js';
 import type {
   CompareDatabaseChapterInput,
@@ -13,7 +13,7 @@ import type {
 
 export class PublishPlanningService {
   constructor(
-    private readonly database: DataBasePublicationClient,
+    private readonly database: LocalPublicationStore,
     private readonly scan: RemoteScanService,
     private readonly edit: EditService,
   ) {}

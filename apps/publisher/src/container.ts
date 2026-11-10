@@ -8,9 +8,10 @@ import { EditService } from './application/edit/EditService.js';
 import { PublicReaderService } from './application/reader/PublicReaderService.js';
 import { ScriptFanqiePlatformDriver } from './drivers/fanqie/ScriptFanqiePlatformDriver.js';
 import type { FanqiePlatformDriver } from './drivers/fanqie/FanqiePlatformDriver.js';
+import { SessionGuardedFanqieDriver } from './drivers/fanqie/SessionGuardedFanqieDriver.js';
 import { InMemoryPublishJobRepository } from './runtime/queue/InMemoryPublishJobRepository.js';
 import { AccountLock } from './runtime/locks/AccountLock.js';
-import { DataBasePublicationClient } from './infrastructure/database/DataBasePublicationClient.js';
+import { LocalPublicationStore } from './infrastructure/local/LocalPublicationStore.js';
 import { FanqiePublicReaderClient } from './infrastructure/reader/FanqiePublicReaderClient.js';
 import { createApp } from './api/http/createApp.js';
 import type { Express } from 'express';
@@ -18,6 +19,8 @@ import type { Express } from 'express';
 export interface FanqieServiceContainer {
   config: ReturnType<typeof loadConfig>;
   driver: FanqiePlatformDriver;
+  sessionGuard: SessionGuardedFanqieDriver;
+  accountLock: AccountLock;
   accounts: AccountService;
   sessions: SessionService;
   scan: RemoteScanService;
@@ -25,14 +28,17 @@ export interface FanqieServiceContainer {
   publishPlanning: PublishPlanningService;
   edit: EditService;
   reader: PublicReaderService;
-  database: DataBasePublicationClient;
+  database: LocalPublicationStore;
   app: Express;
 }
 
 export function createContainer(): FanqieServiceContainer {
   const config = loadConfig();
-  const driver = new ScriptFanqiePlatformDriver(config);
-  const database = new DataBasePublicationClient(config);
+  const driver = new SessionGuardedFanqieDriver(new ScriptFanqiePlatformDriver(config), {
+    cacheMs: Number(process.env.FANQIE_SESSION_CACHE_MINUTES ?? 10) * 60 * 1000,
+    autoRelogin: process.env.FANQIE_AUTO_RELOGIN !== '0',
+  });
+  const database = new LocalPublicationStore();
   const publishJobRepository = new InMemoryPublishJobRepository();
   const accountLock = new AccountLock();
   const accounts = new AccountService(database);
@@ -47,6 +53,8 @@ export function createContainer(): FanqieServiceContainer {
   return {
     config,
     driver,
+    sessionGuard: driver,
+    accountLock,
     accounts,
     sessions,
     scan,

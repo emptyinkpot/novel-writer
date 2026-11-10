@@ -1,8 +1,8 @@
 import { Router, type Router as ExpressRouter } from 'express';
 import type { PublishService } from '../../application/publish/PublishService.js';
 import type { PublishPlanningService } from '../../application/publish/PublishPlanningService.js';
-import type { DataBasePublicationClient } from '../../infrastructure/database/DataBasePublicationClient.js';
-import { databaseDependencyUnavailable } from '../../infrastructure/database/DataBasePublicationClient.js';
+import type { LocalPublicationStore } from '../../infrastructure/local/LocalPublicationStore.js';
+import { databaseDependencyUnavailable } from '../../infrastructure/local/LocalPublicationStore.js';
 import type { RemoteScanService } from '../../application/scan/RemoteScanService.js';
 import { FanqieServiceError } from '../../sdk/errors.js';
 import { ok } from './respond.js';
@@ -10,7 +10,7 @@ import { ok } from './respond.js';
 export function createPublishRouter(
   publish: PublishService,
   planning: PublishPlanningService,
-  database: DataBasePublicationClient,
+  database: LocalPublicationStore,
   scan: RemoteScanService,
 ): ExpressRouter {
   const router = Router();
@@ -98,8 +98,8 @@ function required(value: unknown, field: string): string {
 }
 
 async function recordPublishResult(
-  database: DataBasePublicationClient,
-  resolved: Awaited<ReturnType<DataBasePublicationClient['resolvePublishChapter']>>,
+  database: LocalPublicationStore,
+  resolved: Awaited<ReturnType<LocalPublicationStore['resolvePublishChapter']>>,
   result: Awaited<ReturnType<PublishService['publishChapter']>>,
   body: Record<string, unknown>,
 ) {

@@ -1,23 +1,31 @@
 // Windows DPAPI + AES-GCM cookie extraction from Edge/Chrome profile.
 // Only runs on Windows (process.platform === 'win32').
-// On Linux/macOS, cookies come from DataBase Gateway — this module is a no-op.
+// On Linux/macOS this module is a no-op; cookies are kept in the local store (data/publisher.sqlite).
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { createRuntimeDatabaseClient } from './database-gateway-bridge.mjs';
+import { createRuntimeDatabaseClient } from './local-store.mjs';
 
-export async function extractAndPersistProfileCookies(account) {
+/**
+ * 读取并解密账号 profile 里的番茄相关 cookie（仅 Windows）。
+ * 浏览器开着时也能读：先复制 Cookies 库再打开。不支持的平台返回 null。
+ */
+export async function readProfileCookies(account) {
   if (process.platform !== 'win32') return null;
 
   const cookiesPath = path.join(account.browserDir, 'Default/Network/Cookies');
   const localStatePath = path.join(account.browserDir, 'Local State');
-  if (!fs.existsSync(cookiesPath) || !fs.existsSync(localStatePath)) return null;
+  if (!fs.existsSync(cookiesPath) || !fs.existsSync(localStatePath)) return [];
 
   const aesKey = await getProfileAesKey(localStatePath);
-  if (!aesKey) return null;
+  if (!aesKey) return [];
 
-  const cookies = await decryptCookiesFromSqlite(cookiesPath, aesKey);
-  if (!cookies.length) return null;
+  return decryptCookiesFromSqlite(cookiesPath, aesKey);
+}
+
+export async function extractAndPersistProfileCookies(account, knownCookies) {
+  const cookies = knownCookies ?? await readProfileCookies(account);
+  if (!cookies || !cookies.length) return null;
 
   const db = createRuntimeDatabaseClient();
   const checksum = crypto.createHash('sha256')
@@ -62,7 +70,7 @@ async function getProfileAesKey(localStatePath) {
 
 async function decryptCookiesFromSqlite(cookiesPath, aesKey) {
   // Copy the DB to avoid lock conflicts with running Edge
-  const tmpPath = cookiesPath + '.extract-tmp';
+  const tmpPath = `${cookiesPath}.extract-${process.pid}-${Date.now()}.tmp`;
   fs.copyFileSync(cookiesPath, tmpPath);
   let Database;
   try {

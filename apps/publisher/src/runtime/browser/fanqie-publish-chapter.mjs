@@ -10,6 +10,7 @@ import {
   resolveAccount,
   resolveBrowserExecutable,
   sanitizeFilePart,
+  defaultServiceDataDir,
 } from './fanqie-runtime.mjs';
 
 // 发布脚本是 ScriptFanqiePlatformDriver 调用的浏览器执行入口。
@@ -88,8 +89,8 @@ function sleep(ms) {
 
 async function createRuntime(accountId, headless) {
   // 创建一次发布/扫描运行时：解析账号、定位浏览器、启动持久化 profile、
-  // 注入 DataBase cookie，并返回 Playwright page/context。
-  const dataDir = process.env.FANQIE_SERVICE_DATA_DIR || '.runtime/fanqie-service';
+  // 注入 本地存储 cookie，并返回 Playwright page/context。
+  const dataDir = defaultServiceDataDir();
   const rootDir = process.env.FANQIE_SERVICE_ROOT || process.cwd();
   const contentBaseRoot = process.env.FANQIE_CONTENTBASE_ROOT || ''; // defensive-code-allow: external Fanqie/DataBase/browser boundary contract.
   const account = await resolveAccount({ dataDir, rootDir, contentBaseRoot, accountId });
@@ -128,7 +129,7 @@ async function createRuntime(accountId, headless) {
 }
 
 async function closeRuntime(runtime) {
-  // 关闭前尝试回写 cookie，保证手动登录或后台刷新后的 session 能沉淀回 DataBase。
+  // 关闭前尝试回写 cookie，保证手动登录或后台刷新后的 session 能沉淀回本地存储。
   await persistContextCookies(runtime.context, runtime.account).catch(() => {});
   await runtime.context.close().catch(() => {});
 }

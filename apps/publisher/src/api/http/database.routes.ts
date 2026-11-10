@@ -1,10 +1,10 @@
 import { Router, type Router as ExpressRouter } from 'express';
-import type { DataBasePublicationClient } from '../../infrastructure/database/DataBasePublicationClient.js';
-import { databaseDependencyUnavailable } from '../../infrastructure/database/DataBasePublicationClient.js';
+import type { LocalPublicationStore } from '../../infrastructure/local/LocalPublicationStore.js';
+import { databaseDependencyUnavailable } from '../../infrastructure/local/LocalPublicationStore.js';
 import type { RemoteScanService } from '../../application/scan/RemoteScanService.js';
 import { ok } from './respond.js';
 
-export function createDatabaseRouter(database: DataBasePublicationClient, scan: RemoteScanService): ExpressRouter {
+export function createDatabaseRouter(database: LocalPublicationStore, scan: RemoteScanService): ExpressRouter {
   const router = Router();
 
   router.get('/database/publication-targets', async (req, res, next) => {

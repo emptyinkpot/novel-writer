@@ -1,7 +1,7 @@
-import type { DataBasePublicationClient } from '../../infrastructure/database/DataBasePublicationClient.js';
+import type { LocalPublicationStore } from '../../infrastructure/local/LocalPublicationStore.js';
 
 export class AccountService {
-  constructor(private readonly database: DataBasePublicationClient) {}
+  constructor(private readonly database: LocalPublicationStore) {}
 
   listAccounts() {
     return this.database.listFanqieAccounts();

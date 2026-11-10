@@ -24,12 +24,19 @@ export interface FanqieAccount {
 export interface LoginResult {
   accountId: string;
   status: 'started' | 'completed' | 'failed';
+  /** 失败原因：cancelled / timeout / identity_mismatch 等。 */
+  reason?: string;
   headed: boolean;
   evidence?: Record<string, unknown>;
 }
 
 export interface LoginOptions {
   waitForCompletion?: boolean;
+}
+
+export interface SessionCheckOptions {
+  /** 只跑 headless，不弹出窗口。 */
+  quick?: boolean;
 }
 
 export interface SessionCheckResult {

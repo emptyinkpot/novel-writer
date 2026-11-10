@@ -19,7 +19,7 @@
     "start:mcp": "node dist/src/mcp/server.js",
     "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "pnpm run clean && tsc -p tsconfig.json && node -e \"const fs=require('fs'); const path=require('path'); const src='src/runtime/browser'; const dst='dist/src/runtime/browser'; fs.mkdirSync(dst,{recursive:true}); for (const file of fs.readdirSync(src)) if (file.endsWith('.mjs')) fs.copyFileSync(path.join(src,file), path.join(dst,file));\"",
-    "test": "node --test dist/test/service.test.js dist/test/mcp-tools.test.js",
+    "test": "node --test dist/test/service.test.js dist/test/mcp-tools.test.js dist/test/session-guard.test.js",
     "check": "pnpm run build && pnpm run test",
     "lint": "tsc -p tsconfig.json --noEmit"
   },

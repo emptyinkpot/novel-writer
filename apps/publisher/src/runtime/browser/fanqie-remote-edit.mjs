@@ -11,6 +11,7 @@ import {
   cleanBrowserLocks,
   killBrowserProcessesForProfile,
   getAcceptanceDir,
+  defaultServiceDataDir,
 } from './fanqie-runtime.mjs';
 
 function readArg(flag, defaultValue = '') {
@@ -193,7 +194,7 @@ async function publishRemoteChapterViaApi(page, { bookId, itemId, title, content
 }
 
 async function createRuntime(accountId) {
-  const dataDir = process.env.FANQIE_SERVICE_DATA_DIR || '.runtime/fanqie-service';
+  const dataDir = defaultServiceDataDir();
   const rootDir = process.env.FANQIE_SERVICE_ROOT || process.cwd();
   const contentBaseRoot = process.env.FANQIE_CONTENTBASE_ROOT || '';
   const account = await resolveAccount({ dataDir, rootDir, contentBaseRoot, accountId });

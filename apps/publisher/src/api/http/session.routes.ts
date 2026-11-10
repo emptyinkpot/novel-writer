@@ -25,6 +25,12 @@ export function createSessionRouter(sessions: SessionService): ExpressRouter {
       next(error);
     }
   });
+  router.get('/sessions/state', (_req, res) => {
+    ok(res, sessions.sessionState());
+  });
+  router.get('/accounts/:id/session/state', (req, res) => {
+    ok(res, sessions.sessionState(req.params.id));
+  });
   router.post('/accounts/:id/reauth', async (req, res, next) => {
     try {
       ok(res, await sessions.reauth(req.params.id));

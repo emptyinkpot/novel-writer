@@ -60,7 +60,7 @@ flowchart TB
     subgraph EXEC["⑤ AccountLock 串行 + 浏览器驱动 → 番茄平台"]
         direction TB
         LOCK["AccountLock.run(accountId)<br/>⭐同账号串行(共享 profile/cookie/发布状态不能并发)<br/>不同账号互不阻塞 · 前序失败不阻断队列"]
-        COOKIE["浏览器 runtime 取 cookie/会话<br/>⭐只能经 DataBase Gateway(database.example.invalid)<br/>/content/publication/accounts · 禁止直连 MySQL"]
+        COOKIE["浏览器 runtime 取 cookie/会话<br/>⭐来自本地 data/publisher.sqlite<br/>/content/publication/accounts · 禁止直连 MySQL"]
         DRIVE["FanqiePlatformDriver.publishChapter<br/>Playwright: open_work→upload→submit→check_result"]
         CONF{"平台确认证据?<br/>result.confirmed<br/>⭐点了提交≠成功,要平台回显确认"}
         LOCK --> COOKIE --> DRIVE --> CONF

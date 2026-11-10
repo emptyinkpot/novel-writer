@@ -8,7 +8,7 @@ import type { PublishService } from '../../application/publish/PublishService.js
 import type { PublishPlanningService } from '../../application/publish/PublishPlanningService.js';
 import type { EditService } from '../../application/edit/EditService.js';
 import type { PublicReaderService } from '../../application/reader/PublicReaderService.js';
-import type { DataBasePublicationClient } from '../../infrastructure/database/DataBasePublicationClient.js';
+import type { LocalPublicationStore } from '../../infrastructure/local/LocalPublicationStore.js';
 import { createAccountsRouter } from './accounts.routes.js';
 import { createSessionRouter } from './session.routes.js';
 import { createScanRouter } from './scan.routes.js';
@@ -28,7 +28,7 @@ export interface AppDeps {
   publishPlanning: PublishPlanningService;
   edit: EditService;
   reader: PublicReaderService;
-  database: DataBasePublicationClient;
+  database: LocalPublicationStore;
 }
 
 export function createApp(deps: AppDeps): Express {

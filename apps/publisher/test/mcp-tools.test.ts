@@ -15,7 +15,9 @@ import { NotConfiguredFanqiePlatformDriver } from '../src/drivers/fanqie/FanqieP
 import { InMemoryPublishJobRepository } from '../src/runtime/queue/InMemoryPublishJobRepository.js';
 import { FANQIE_TOOLS } from '../src/api/protocol/tool-catalog.js';
 import { registerFanqieTools } from '../src/mcp/tool-registry/mcp-tools.js';
-import type { DataBasePublicationClient } from '../src/infrastructure/database/DataBasePublicationClient.js';
+import { SessionGuardedFanqieDriver } from "../src/drivers/fanqie/SessionGuardedFanqieDriver.js";
+import { AccountLock } from "../src/runtime/locks/AccountLock.js";
+import type { LocalPublicationStore } from '../src/infrastructure/local/LocalPublicationStore.js';
 
 test('mcp tool registry uses schema-first granular capability names', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'fanqie-mcp-test-'));
@@ -34,6 +36,8 @@ test('mcp tool registry uses schema-first granular capability names', async () =
         version: 'test',
       },
       driver,
+      sessionGuard: new SessionGuardedFanqieDriver(driver),
+      accountLock: new AccountLock(),
       accounts: new AccountService(database),
       sessions: new SessionService(driver),
       scan,
@@ -63,7 +67,7 @@ test('mcp tool registry uses schema-first granular capability names', async () =
   }
 });
 
-function createFakeDatabaseClient(): DataBasePublicationClient {
+function createFakeDatabaseClient(): LocalPublicationStore {
   return {
     listPublicationTargets: async () => [],
     listFanqieWorks: async () => [],
@@ -82,7 +86,7 @@ function createFakeDatabaseClient(): DataBasePublicationClient {
       fanqieWorks: [],
     }),
     listFanqieAccounts: async () => [],
-  } as unknown as DataBasePublicationClient;
+  } as unknown as LocalPublicationStore;
 }
 
 function createFakeReaderService(): PublicReaderService {

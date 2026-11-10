@@ -1,12 +1,12 @@
 import { Router, type Router as ExpressRouter } from 'express';
 import type { EditService } from '../../application/edit/EditService.js';
 import type { PublishPlanningService } from '../../application/publish/PublishPlanningService.js';
-import type { DataBasePublicationClient } from '../../infrastructure/database/DataBasePublicationClient.js';
-import { databaseDependencyUnavailable } from '../../infrastructure/database/DataBasePublicationClient.js';
+import type { LocalPublicationStore } from '../../infrastructure/local/LocalPublicationStore.js';
+import { databaseDependencyUnavailable } from '../../infrastructure/local/LocalPublicationStore.js';
 import { FanqieServiceError } from '../../sdk/errors.js';
 import { ok } from './respond.js';
 
-export function createEditRouter(edit: EditService, planning: PublishPlanningService, database: DataBasePublicationClient): ExpressRouter {
+export function createEditRouter(edit: EditService, planning: PublishPlanningService, database: LocalPublicationStore): ExpressRouter {
   const router = Router();
 
   router.get('/remote/chapters/:bookId/:itemId', async (req, res, next) => {
@@ -70,8 +70,8 @@ function stringQuery(value: unknown): string | undefined {
 }
 
 async function recordEditResult(
-  database: DataBasePublicationClient,
-  resolved: Awaited<ReturnType<DataBasePublicationClient['resolvePublishChapter']>>,
+  database: LocalPublicationStore,
+  resolved: Awaited<ReturnType<LocalPublicationStore['resolvePublishChapter']>>,
   result: Awaited<ReturnType<EditService['editRemoteChapter']>>,
   body: Record<string, unknown>,
 ) {

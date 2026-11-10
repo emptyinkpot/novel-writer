@@ -14,13 +14,21 @@ export class ChatController {
     const user = req.user as any;
     const pkg = this.chatService.checkQuota(user);
 
+    let upstream: globalThis.Response;
+    try {
+      upstream = await this.chatService.streamChat(body);
+    } catch (error: any) {
+      const status = typeof error?.getStatus === 'function' ? error.getStatus() : 502;
+      res.status(status).json({ statusCode: status, message: error?.message || 'upstream model request failed' });
+      return;
+    }
+
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
 
-    const upstream = await this.chatService.streamChat(body);
     if (!upstream.ok) {
       res.write(`data: ${JSON.stringify({ error: upstream.statusText })}\n\n`);
       res.end();

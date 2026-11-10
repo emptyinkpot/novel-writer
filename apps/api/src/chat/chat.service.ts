@@ -1,6 +1,6 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import { Injectable, ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
 import { UserEntity } from '../user/user.entity';
-import { requiredEnv } from '../env';
+import { llmConfig } from '../env';
 
 const SYSTEM_PROMPT = [
   '你是一个专业的小说写作助手。',
@@ -13,8 +13,6 @@ const SYSTEM_PROMPT = [
 
 @Injectable()
 export class ChatService {
-  private readonly sub2apiUrl = requiredEnv('SUB2API_URL').replace(/\/+$/, '');
-  private readonly sub2apiKey = requiredEnv('SUB2API_KEY');
 
   checkQuota(user: UserEntity) {
     const plan = user.memberPlan;
@@ -44,12 +42,14 @@ export class ChatService {
   }
 
   async streamChat(body: any): Promise<Response> {
+    const llm = llmConfig();
+    if (!llm) throw new ServiceUnavailableException('未配置模型接口：请在 .env 中设置 LLM_BASE_URL 和 LLM_API_KEY');
     const messages = this.buildMessages(body);
-    const upstream = await fetch(`${this.sub2apiUrl}/chat/completions`, {
+    const upstream = await fetch(`${llm.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.sub2apiKey}`,
+        Authorization: `Bearer ${llm.apiKey}`,
       },
       body: JSON.stringify({
         model: body.model || 'gpt-4o',

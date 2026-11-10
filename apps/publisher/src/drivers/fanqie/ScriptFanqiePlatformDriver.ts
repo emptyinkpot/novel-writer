@@ -14,6 +14,7 @@ import type {
   RemoteWorkSnapshot,
   ScanWorksInput,
   SessionCheckResult,
+  SessionCheckOptions,
   SyncRemoteChaptersInput,
 } from '../../sdk/types.js';
 import { FanqieServiceError } from '../../sdk/errors.js';
@@ -34,9 +35,11 @@ export class ScriptFanqiePlatformDriver implements FanqiePlatformDriver {
       '--login',
       ...(options.waitForCompletion ? ['--wait'] : []),
     ]);
+    const raw = String(payload.status || '');
     return {
       accountId: String(payload.accountId || accountId),
-      status: payload.status === 'completed' ? 'completed' : 'started',
+      status: raw === 'completed' ? 'completed' : raw === 'started' ? 'started' : 'failed',
+      reason: raw && raw !== 'completed' && raw !== 'started' ? raw : undefined,
       headed: true,
       evidence: sanitizeEvidence(payload),
     };
@@ -52,16 +55,28 @@ export class ScriptFanqiePlatformDriver implements FanqiePlatformDriver {
     };
   }
 
-  async checkSession(accountId: string): Promise<SessionCheckResult> {
-    const payload = await this.runScriptJson('fanqie-session-check.mjs', [accountId]);
-    const results = Array.isArray(payload) ? payload : [];
-    const usable = results.find((item) => item && item.skipped !== true && Number(item.workCount || 0) > 0)
-      || results.find((item) => item && item.skipped !== true && /book-manage/.test(String(item.url || '')));
+  async checkSession(accountId: string, options: SessionCheckOptions = {}): Promise<SessionCheckResult> {
+    let payload: unknown;
+    try {
+      payload = await this.runScriptJson('fanqie-session-check.mjs', [accountId, ...(options.quick ? ['--quick'] : [])]);
+    } catch (error) {
+      if (error instanceof FanqieServiceError && /本地没有番茄账号/.test(error.message)) {
+        const checkedAt = new Date().toISOString();
+        return { accountId, valid: false, status: 'missing', checkedAt, evidence: { checkedAt, error: error.message } };
+      }
+      throw error;
+    }
+    const results: any[] = Array.isArray(payload) ? payload : [];
+    const ran = results.filter((item) => item && item.skipped !== true);
+    const usable = ran.find((item) => Number(item.workCount || 0) > 0)
+      || ran.find((item) => !item.error && /book-manage/.test(String(item.url || '')));
+    // 只有明确被重定向到登录页才算过期；网络错误等情况记为 unknown，不触发登录。
+    const expired = !usable && ran.some((item) => isLoginUrl(String(item.url || '')));
     const checkedAt = new Date().toISOString();
     return {
       accountId,
       valid: Boolean(usable),
-      status: usable ? 'valid' : 'unknown',
+      status: usable ? 'valid' : expired ? 'expired' : 'unknown',
       checkedAt,
       evidence: {
         checkedAt,
@@ -290,4 +305,8 @@ function objectOrUndefined(value: unknown): Record<string, unknown> | undefined 
 
 function objectOrNull(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function isLoginUrl(url: string): boolean {
+  return /\/main\/writer\/login|passport\.|\/login\b|sso\./i.test(url);
 }

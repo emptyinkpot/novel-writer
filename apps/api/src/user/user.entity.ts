@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { columnTypes } from '../env';
 
 @Entity('nw_users')
 export class UserEntity {
@@ -26,7 +27,7 @@ export class UserEntity {
   @Column({ length: 32, default: 'active' })
   status: string;
 
-  @Column({ name: 'member_plan', type: 'json', nullable: true })
+  @Column({ name: 'member_plan', type: columnTypes.json, nullable: true })
   memberPlan: Record<string, any>;
 
   @Column({ name: 'last_sign_in_at', type: 'datetime', nullable: true })

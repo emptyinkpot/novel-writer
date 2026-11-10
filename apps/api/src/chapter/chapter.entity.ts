@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { columnTypes } from '../env';
 
 @Entity('nw_chapters')
 export class ChapterEntity {
@@ -11,7 +12,7 @@ export class ChapterEntity {
   @Column({ length: 200 })
   title: string;
 
-  @Column({ type: 'longtext', nullable: true })
+  @Column({ type: columnTypes.longText, nullable: true })
   content: string;
 
   @Column({ name: 'sort_order', type: 'int', default: 0 })

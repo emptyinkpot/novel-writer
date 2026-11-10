@@ -45,20 +45,11 @@ Core Runtime
   -> optional MCP adapter
 ```
 
-## Railway Deployment
+## 本地运行
 
-Railway should deploy this repository directly from GitHub. The service auto
-binds to `0.0.0.0:$PORT` when Railway provides `PORT`.
-
-Required Railway variables:
-
-```text
-DATABASE_GATEWAY_URL=https://database.example.invalid
-FANQIE_SERVICE_DATA_DIR=/app/.runtime/fanqie-service
-```
-
-Do not put Fanqie account passwords, cookies, or browser profile paths in Dify.
-Fanqie session data belongs to DataBase and fanqie-service runtime only.
+publisher 只依赖本仓库：账号、cookie、发布目标和发布记录存放在仓库根目录 `data/publisher.sqlite`，
+待发布章节读取 `data/novel-writer.sqlite`（apps/api 的作品库）。默认监听 `127.0.0.1:19202`。
+番茄登录态的自动检查与重新登录见根目录 `ARCHITECTURE.md`。
 
 For this project, that means:
 

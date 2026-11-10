@@ -2,40 +2,30 @@
   "name": "guga-write",
   "projectName": "咕嘎写作",
   "machineReadableEntry": "project.json",
-  "githubRepo": "https://github.com/emptyinkpot/novel-writer",
   "visibility": "private",
   "type": "project",
-  "owner": "emptyinkpot",
-  "canonicalPurpose": "AI-assisted long-form novel writing workspace.",
+  "canonicalPurpose": "AI-assisted long-form novel writing workspace: write, review, publish.",
   "readOrder": [
     "ARCHITECTURE.md",
-    "project.json",
-    "apps/api/.env.example"
+    "project.json"
   ],
   "defaultBranch": "main",
-  "localSourceRoot": "E:\\My Project\\novel-writer",
-  "preferredActiveServer": {
-    "host": "SERVER_IP_REMOVED",
-    "sourceRoot": "github:emptyinkpot/novel-writer#main",
-    "runtimeRoot": "/data/coolify/applications/{coolify.resourceUuid}"
-  },
+  "portability": "self-contained: runs from a fresh clone with no external services; all external endpoints are optional env vars",
+  "dataRoot": "data/",
   "configurationSurfaces": [
-    "Coolify application .env",
-    "apps/api/.env.example",
-    "Dockerfile"
-  ],
-  "secretSurfaces": [
-    "Coolify application .env"
+    ".env (repo root, optional, gitignored)"
   ],
   "installEntry": {
     "packageManager": "pnpm",
     "install": "pnpm install",
-    "build": "pnpm --filter @guga-write/api build && pnpm --filter @guga-write/web build",
-    "dev": "pnpm -r --parallel run dev"
+    "build": "pnpm -r run build",
+    "dev": "pnpm dev"
   },
   "status": "active",
-  "domainRole": "novel-writing-runtime",
-  "publicUrl": "https://writer.example.invalid/",
-  "publicHealthPath": "/api/v1/health",
-  "publicPort": 19200
+  "healthPath": "/api/v1/health",
+  "ports": {
+    "web": 19200,
+    "api": 19201,
+    "publisher": 19202
+  }
 }
