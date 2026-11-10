@@ -1,6 +1,6 @@
 import { Controller, Post, Body, UseGuards, Req, Res } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { ChatService } from './chat.service';
+import { ChatService, countChars, extractSseContent } from './chat.service';
 import { Request, Response } from 'express';
 import { Readable } from 'stream';
 
@@ -12,7 +12,7 @@ export class ChatController {
   @UseGuards(JwtAuthGuard)
   async chatV2(@Req() req: Request, @Res() res: Response, @Body() body: any) {
     const user = req.user as any;
-    const pkg = this.chatService.checkQuota(user);
+    const quota = this.chatService.checkQuota(user);
 
     let upstream: globalThis.Response;
     try {
@@ -37,20 +37,28 @@ export class ChatController {
 
     const reader = (upstream.body as any).getReader();
     const decoder = new TextDecoder();
-    let tokensUsed = 0;
+    let pending = '';
+    let generated = '';
 
-    const pump = async () => {
+    try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         const chunk = decoder.decode(value, { stream: true });
-        tokensUsed += this.estimateTokens(chunk);
         res.write(chunk);
+        const parsed = extractSseContent(pending + chunk);
+        pending = parsed.rest;
+        generated += parsed.text;
       }
-      this.chatService.deductQuota(pkg, tokensUsed);
+      generated += extractSseContent(pending + '\n').text;
+    } catch {
+      /* 上游中断：已生成的部分照常计费 */
+    } finally {
       res.end();
-    };
-    pump().catch(() => res.end());
+      await this.chatService.deductQuota(user.id, quota, countChars(generated)).catch((error) => {
+        console.error('[chat] 扣减字数失败', error);
+      });
+    }
   }
 
   @Post('model-success-rates')
@@ -65,7 +73,4 @@ export class ChatController {
     };
   }
 
-  private estimateTokens(chunk: string): number {
-    return Math.ceil(chunk.length / 4);
-  }
 }
