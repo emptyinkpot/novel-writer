@@ -1,11 +1,7 @@
-// 文章任务存储源码：通过 DataBase Gateway 持久化 article job、进度和结果。
+// 文章任务存储源码：在本地 data/writer-engine.sqlite 持久化 article job、进度和结果。
 // 这里只处理存储协议，不参与生成决策。
-import { databaseGatewayHeaders, getArticleJobGatewayService } from '../config/env.ts';
+import { openWriterDb, type SqliteDb } from '../storage/local-db.ts';
 
-type ArticleJobStoreRequestOptions = {
-  method?: string;
-  body?: unknown;
-};
 
 export type ArticleJobStatus = 'queued' | 'running' | 'finished' | 'failed';
 
@@ -30,13 +26,6 @@ export type ArticleJob = {
   persistQueue?: Promise<void>;
 };
 
-type GatewayItemResponse<T> = {
-  ok?: boolean;
-  item?: T;
-  message?: string;
-  error?: string;
-};
-
 export type ArticleJobStore = {
   create: (job: ArticleJob, requestBody: unknown) => Promise<unknown>;
   get: (id: string) => Promise<ArticleJob | null>;
@@ -44,97 +33,48 @@ export type ArticleJobStore = {
   update: (job: ArticleJob) => Promise<unknown>;
 };
 
-export function createArticleJobStore() {
-  const service = getArticleJobGatewayService();
-  const gatewayUrl = service.baseUrl;
-  const requestTimeoutMs = readPositiveInteger(process.env.CONTENTBASE_JOB_STORE_TIMEOUT_MS, 60000);
-  if (!gatewayUrl) {
-    throw new Error('CONTENTBASE_JOB_GATEWAY_URL or DATABASE_GATEWAY_URL is required for persistent article jobs');
-  }
-  if (!service.explicitJobGateway && isDockerHostGatewayUrl(gatewayUrl)) {
-    throw new Error('CONTENTBASE_JOB_GATEWAY_URL is required when DATABASE_GATEWAY_URL points at a Docker host gateway address');
-  }
-
-  const headers = { 'content-type': 'application/json', ...databaseGatewayHeaders(service) };
-
-  async function request<T = unknown>(path: string, options: ArticleJobStoreRequestOptions = {}): Promise<T> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(new Error(`DataBase Gateway article job request timed out after ${requestTimeoutMs}ms`)), requestTimeoutMs);
-    let response;
-    try {
-      response = await fetch(`${gatewayUrl}${path}`, {
-        method: options.method || 'GET',
-        headers,
-        body: options.body === undefined ? undefined : JSON.stringify(options.body),
-        signal: controller.signal,
-      });
-    } catch (error) {
-      if (controller.signal.aborted) {
-        throw new Error(`DataBase Gateway article job request timed out after ${requestTimeoutMs}ms`);
-      }
-      throw error;
-    } finally {
-      clearTimeout(timeout);
-    }
-    const text = await response.text();
-    let body: GatewayItemResponse<T> = {};
-    try {
-      body = text ? JSON.parse(text) : {};
-    } catch {
-      throw new Error(`DataBase Gateway returned non-JSON HTTP ${response.status}: ${text.slice(0, 240)}`);
-    }
-    if (!response.ok || body.ok === false) {
-      throw new Error(`DataBase Gateway article job request failed: HTTP ${response.status} ${body.message || body.error || ''}`.trim());
-    }
-    return body.item;
-  }
+export function createArticleJobStore(db: SqliteDb = openWriterDb()) {
+  const toJob = (row: Record<string, any> | undefined): ArticleJob | null => row ? ({
+    id: row.id,
+    status: row.status,
+    createdAt: row.created_at,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+    updatedAt: row.updated_at,
+    stage: row.stage || '',
+    lastMessage: row.last_message || '',
+    events: parseJson(row.events, []),
+    error: row.error,
+    result: parseJson(row.result, null),
+  }) : null;
 
   return {
-    create: (job: ArticleJob, requestBody: unknown) => request('/contentbase/article-jobs', {
-      method: 'POST',
-      body: {
-        id: job.id,
-        status: job.status,
-        stage: job.stage,
-        lastMessage: job.lastMessage,
-        request: requestBody,
-        events: job.events,
-        createdAt: job.createdAt,
-        updatedAt: job.updatedAt,
-      },
-    }),
-    get: (id: string) => request(`/contentbase/article-jobs/${encodeURIComponent(id)}`),
-    result: async (id: string) => {
-      const item = await request(`/contentbase/article-jobs/${encodeURIComponent(id)}/result`);
-      return item;
+    create: async (job: ArticleJob, requestBody: unknown) => {
+      db.prepare(`INSERT OR REPLACE INTO article_jobs (id, status, stage, last_message, request, events, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(job.id, job.status, job.stage, job.lastMessage, JSON.stringify(requestBody ?? null),
+        JSON.stringify(job.events || []), job.createdAt, job.updatedAt);
+      return toJob(db.prepare('SELECT * FROM article_jobs WHERE id = ?').get(job.id) as Record<string, any>);
     },
-    update: (job: ArticleJob) => request(`/contentbase/article-jobs/${encodeURIComponent(job.id)}`, {
-      method: 'PATCH',
-      body: {
-        status: job.status,
-        stage: job.stage,
-        lastMessage: job.lastMessage,
-        events: job.events,
-        error: job.error,
-        result: job.result,
-        startedAt: job.startedAt,
-        updatedAt: job.updatedAt,
-        finishedAt: job.finishedAt,
-      },
-    }),
+    get: async (id: string) => toJob(db.prepare('SELECT * FROM article_jobs WHERE id = ?').get(id) as Record<string, any>),
+    result: async (id: string) => {
+      const row = db.prepare('SELECT result FROM article_jobs WHERE id = ?').get(id) as Record<string, any> | undefined;
+      return row ? { result: parseJson(row.result, null) } : null;
+    },
+    update: async (job: ArticleJob) => {
+      db.prepare(`UPDATE article_jobs SET status = ?, stage = ?, last_message = ?, events = ?, error = ?, result = ?,
+        started_at = ?, finished_at = ?, updated_at = ? WHERE id = ?`).run(job.status, job.stage, job.lastMessage,
+        JSON.stringify(job.events || []), job.error, job.result === undefined ? null : JSON.stringify(job.result),
+        job.startedAt, job.finishedAt, job.updatedAt, job.id);
+      return toJob(db.prepare('SELECT * FROM article_jobs WHERE id = ?').get(job.id) as Record<string, any>);
+    },
   } satisfies ArticleJobStore;
 }
 
-function readPositiveInteger(value: unknown, defaultValue: number): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : defaultValue;
-}
-
-function isDockerHostGatewayUrl(value: string): boolean {
+function parseJson<T>(text: unknown, fallback: T): T {
+  if (typeof text !== 'string' || !text) return fallback;
   try {
-    const url = new URL(value);
-    return /^172\.(1[6-9]|2\d|3[01])\./.test(url.hostname);
+    return JSON.parse(text) as T;
   } catch {
-    return false;
+    return fallback;
   }
 }

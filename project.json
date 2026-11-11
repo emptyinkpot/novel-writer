@@ -26,6 +26,7 @@
   "ports": {
     "web": 19200,
     "api": 19201,
-    "publisher": 19202
+    "publisher": 19202,
+    "writer-engine": 19203
   }
 }

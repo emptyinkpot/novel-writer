@@ -14,7 +14,7 @@
 | `apps/web` | Next.js 前端，`/api/*` rewrite 到 API | 19200 |
 | `apps/api` | NestJS API：账号、作品、章节、对话、支付 | 19201 |
 | `apps/publisher` | 番茄发布服务：账号登录态、作品扫描、章节发布与编辑 | 19202 |
-| `apps/writer-engine` | 文章 agent 流水线（迁自 ContentBase） | — |
+| `apps/writer-engine` | 文章 agent 流水线：本地语料检索 → 规划 → 写作 → 审校 | 19203 |
 | `packages/shared` | 共享类型 | — |
 
 ## 本地数据
@@ -25,6 +25,7 @@
 | `data/.jwt-secret` | 未设置 `JWT_SECRET` 时自动生成，重启后登录态不丢 |
 | `data/publisher.sqlite` | 番茄账号与 cookie、发布目标、远端作品/章节快照、发布记录 |
 | `data/publisher/` | 番茄浏览器 profile、验收截图 |
+| `data/writer-engine.sqlite` | 本地语料库（FTS5 全文索引）、文章任务、写作反馈 |
 
 publisher 读取 `data/novel-writer.sqlite` 的 `nw_chapters` 作为待发布章节来源（只读）。
 
@@ -32,7 +33,8 @@ publisher 读取 `data/novel-writer.sqlite` 的 `nw_chapters` 作为待发布章
 
 | 变量 | 作用 |
 | --- | --- |
-| `LLM_BASE_URL` / `LLM_API_KEY` | OpenAI 兼容模型接口。未设置时对话接口返回 503「未配置模型接口」 |
+| `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` | OpenAI 兼容模型接口，API 对话和 writer-engine 共用。未设置时对话接口返回 503「未配置模型接口」 |
+| `WRITER_REQUIRE_EVIDENCE` | `1` 时 writer-engine 必须检索到事实资料才生成（默认不强制） |
 | `DB_HOST` `DB_PORT` `DB_USER` `DB_PASS` `DB_NAME` | 设置 `DB_HOST` 后 API 改用 MySQL（表结构见 `apps/api/init.sql`） |
 | `JWT_SECRET` | 覆盖自动生成的 JWT 密钥 |
 | `APP_URL` / `API_PUBLIC_URL` | 支付回调和跳转使用的外部地址，默认 `http://localhost:19200` |

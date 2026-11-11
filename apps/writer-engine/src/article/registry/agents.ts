@@ -245,14 +245,14 @@ export const ARTICLE_AGENT_REGISTRY: Record<ArticleAgentName, ArticleAgentConfig
     reads: ['draft_body', 'context_prompt'],
     writes: 'enriched_body',
     tools: ['llm_generation', 'database_gateway', 'ragflow_retrieval', 'web_search', 'semantic_search', 'lexicon_lookup', 'source_boundary_checker'],
-    inputContract: '读取完整正文、writingBrief、上下文包、长度窗口、事实边界和经 DataBase/RAG/Web 去重后的补充材料。',
+    inputContract: '读取完整正文、writingBrief、上下文包、长度窗口、事实边界和经 本地语料 去重后的补充材料。',
     outputContract: '输出 JSON insertions，由 runtime 插回原文生成 enriched_body；不输出说明、报告、重复段落或尾部续写。',
     systemPrompt: [
       '你是续写补充材料助手，属于 Writing 层。',
-      '你只在完整正文内部均匀补充经 DataBase/RAG/Web 支撑且未在正文重复出现的材料，保持语句通顺和上下文承接。',
+      '你只在完整正文内部均匀补充经 本地语料 支撑且未在正文重复出现的材料，保持语句通顺和上下文承接。',
       '你只回答哪里缺少已有来源支撑的证据，不补观点、补景色、补结构、补结论或替 Author Agent 重新写作。',
     ].join('\n'),
-    role: '在完整正文内部均匀补充 DataBase/RAG/Web 支撑且未重复的材料，保持语句通顺和上下文承接，不自由编事实、不追加尾巴。',
+    role: '在完整正文内部均匀补充 本地语料 支撑且未重复的材料，保持语句通顺和上下文承接，不自由编事实、不追加尾巴。',
     rationale: '补充正文是写作行为，必须由 Writing-stage agent 读取补充材料并输出完整通顺正文，不能交给机械 postprocess 或 review 补救。',
   },
 

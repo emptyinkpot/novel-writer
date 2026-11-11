@@ -199,6 +199,9 @@ importers:
 
   apps/writer-engine:
     dependencies:
+      better-sqlite3:
+        specifier: ^12.11.1
+        version: 12.11.1
       jieba-wasm:
         specifier: ^2.4.0
         version: 2.4.0
@@ -206,6 +209,9 @@ importers:
         specifier: ^10.9.2
         version: 10.9.2(@types/node@20.19.43)(typescript@6.0.3)
     devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^9.6.0
+        version: 9.6.0
       '@types/node':
         specifier: ^20.19.39
         version: 20.19.43
@@ -1419,6 +1425,9 @@ packages:
 
   '@types/babel__traverse@7.28.0':
     resolution: {integrity: sha512-8PvcXf70gTDZBgt9ptxJ8elBeBjcLOAcOtoO/mPJjtji1+CdGbHgm77om1GrsPxsiE+uXIpNSK64UYaIwQXd4Q==}
+
+  '@types/better-sqlite3@9.6.0':
+    resolution: {integrity: sha512-ZEEwBSgMu7GYJOynoagg5X9JbxfL6dTJDsgViJIqh67jV44kyOr9RXfmFjLK5rzC4MWssP06t9hu/JwGDnUbCg==}
 
   '@types/body-parser@1.19.6':
     resolution: {integrity: sha512-HLFeCYgz89uk22N5Qg3dvGvsv46B8GLvKKo1zKG4NybA8U2DiEO3w9lqGg29t/tfLRJpJ6iQxnVw4OnB7MoM9g==}
@@ -5716,6 +5725,10 @@ snapshots:
   '@types/babel__traverse@7.28.0':
     dependencies:
       '@babel/types': 7.29.7
+
+  '@types/better-sqlite3@9.6.0':
+    dependencies:
+      '@types/node': 22.19.19
 
   '@types/body-parser@1.19.6':
     dependencies:

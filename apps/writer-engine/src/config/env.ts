@@ -1,13 +1,8 @@
-// 唯一运行时 env 读取层：先读 process.env，再按需加载本地 .env.example/.env。
-// .env 是本机或服务器私有注入快照，被 git 忽略；真实密钥不要写入源码。
+// 唯一运行时 env 读取层：先读 process.env，再加载仓库根目录的 .env（可选，已 gitignore）。
+// 项目只认识自己：没有任何外部网关配置；模型接口与整个项目共用 LLM_* 变量。
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-
-export type HttpServiceConfig = {
-  baseUrl: string; // 服务根地址，例如 DataBase Gateway URL。
-  apiKey: string; // 调服务用的密钥；这里只传递，不打印真实值。
-  headerName: string; // API key 放在哪个 header，DataBase Gateway 默认 X-DataBase-Api-Key。
-};
+import { findRepoRoot } from '../storage/local-db.ts';
 
 export type ModelServiceConfig = {
   baseUrl: string; // OpenAI-compatible /chat/completions 根地址。
@@ -23,64 +18,20 @@ export type StormResearchConfig = {
 };
 
 export function loadRuntimeEnv(): void {
-  const workspaceRoot = process.env.CONTENTBASE_WORKSPACE_ROOT || process.cwd();
-  loadEnvFile(join(workspaceRoot, '.env.example'));
-  loadEnvFile(join(workspaceRoot, '.env'));
+  loadEnvFile(join(findRepoRoot(), '.env'));
 }
 
 export function getRuntimeEnvDiagnostics(): Record<string, any> {
   // /api/corpus/diagnostics 调这里；只返回“是否配置”和脱敏地址，不泄露 secret。
-  const isCoolify = Boolean(process.env.COOLIFY_RESOURCE_UUID || process.env.COOLIFY_CONTAINER_NAME);
   const writer = getWriterModelService();
-  const gateway = getDatabaseGatewayService();
-  const jobGateway = getArticleJobGatewayService();
   return {
-    injection: {
-      detectedSource: isCoolify ? 'coolify-env-file' : 'process-env',
-      coolify: isCoolify ? {
-        resourceUuid: process.env.COOLIFY_RESOURCE_UUID || '',
-        branch: process.env.COOLIFY_BRANCH || '',
-        containerName: process.env.COOLIFY_CONTAINER_NAME || '',
-        fqdn: process.env.COOLIFY_FQDN || '',
-      } : null,
-      sourceCommit: process.env.SOURCE_COMMIT || '',
-    },
     writer: {
       baseUrl: writer.baseUrl ? redactUrl(writer.baseUrl) : 'not configured',
       apiKey: writer.apiKey ? 'configured' : 'not configured',
       model: writer.model || 'not configured',
-      providerHint: writer.baseUrl.includes('sub2api') ? 'sub2api' : 'openai-compatible',
     },
-    gateway: {
-      url: gateway.baseUrl || 'not configured',
-      jobUrl: jobGateway.baseUrl || 'not configured',
-      apiKey: gateway.apiKey ? 'configured' : 'not configured',
-      header: gateway.headerName,
-      note: 'ContentBase reads corpus, evidence, vocabulary, semantic and author context through DataBase Gateway; Gateway owns MySQL/RAGFlow internals.',
-      networkWarning: isCoolify && isLoopbackUrl(gateway.baseUrl)
-        ? 'loopback URL points at the ContentBase container, not the Docker host'
-        : '',
-    },
+    corpus: 'local sqlite (data/writer-engine.sqlite)',
     storm: getStormResearchDiagnostics(),
-  };
-}
-
-export function getDatabaseGatewayService(overrides?: Partial<HttpServiceConfig>): HttpServiceConfig {
-  // 文章上下文、job 存储、反馈记忆都通过 DataBase Gateway；ContentBase 不直连 RAGFlow/MySQL/Letta。
-  return {
-    baseUrl: normalizeBaseUrl(overrides?.baseUrl || process.env.DATABASE_GATEWAY_URL || ''),
-    apiKey: String(overrides?.apiKey || process.env.DATABASE_GATEWAY_API_KEY || '').trim(),
-    headerName: String(overrides?.headerName || process.env.DATABASE_GATEWAY_HEADER || 'X-DataBase-Api-Key').trim() || 'X-DataBase-Api-Key',
-  };
-}
-
-export function getArticleJobGatewayService(): HttpServiceConfig & { explicitJobGateway: boolean } {
-  // job 存储默认复用 DataBase Gateway；需要分开时才填 CONTENTBASE_JOB_GATEWAY_URL。
-  const databaseGateway = getDatabaseGatewayService();
-  return {
-    ...databaseGateway,
-    baseUrl: normalizeBaseUrl(process.env.CONTENTBASE_JOB_GATEWAY_URL || databaseGateway.baseUrl),
-    explicitJobGateway: Boolean(String(process.env.CONTENTBASE_JOB_GATEWAY_URL || '').trim()),
   };
 }
 
@@ -91,10 +42,11 @@ export function getWriterModelService(): ModelServiceConfig {
     const profiled = getProfiledModelService('CONTENTBASE_LLM', profile);
     if (profiled.baseUrl || profiled.apiKey || profiled.model) return profiled;
   }
+  // 未单独配置 writer-engine 时，复用整个项目的 LLM_BASE_URL / LLM_API_KEY / LLM_MODEL。
   return {
-    baseUrl: normalizeBaseUrl(readEnv('CONTENTBASE_LLM_BASE_URL')),
-    apiKey: readEnv('CONTENTBASE_LLM_API_KEY'),
-    model: readEnv('CONTENTBASE_LLM_MODEL'),
+    baseUrl: normalizeBaseUrl(readEnv('CONTENTBASE_LLM_BASE_URL') || readEnv('LLM_BASE_URL')),
+    apiKey: readEnv('CONTENTBASE_LLM_API_KEY') || readEnv('LLM_API_KEY'),
+    model: readEnv('CONTENTBASE_LLM_MODEL') || readEnv('LLM_MODEL'),
   };
 }
 
@@ -171,12 +123,6 @@ export function getWriterServiceDiagnostics(): Record<string, any> {
   };
 }
 
-export function databaseGatewayHeaders(service: HttpServiceConfig = getDatabaseGatewayService()): Record<string, string> {
-  // 统一生成 DataBase Gateway 鉴权头，避免各模块散写 header 名。
-  const key = String(service.apiKey || '').trim();
-  return key ? { [service.headerName]: key } : {};
-}
-
 export function normalizeBaseUrl(value: string): string {
   // 所有服务根地址去掉末尾斜杠，调用方再拼 /path。
   return String(value || '').trim().replace(/\/+$/, '');
@@ -225,16 +171,6 @@ function redactUrl(value: string): string {
     return `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, '')}`;
   } catch {
     return 'configured';
-  }
-}
-
-function isLoopbackUrl(value: string): boolean {
-  // Coolify 容器里 127.0.0.1 指向容器自己，不是宿主机。
-  try {
-    const url = new URL(String(value || ''));
-    return ['127.0.0.1', 'localhost', '::1'].includes(url.hostname);
-  } catch {
-    return false;
   }
 }
 

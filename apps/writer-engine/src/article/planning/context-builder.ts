@@ -1,7 +1,7 @@
 // 上下文引擎源码：把用户输入转成 DataBase Gateway 查询，并把 Reality/Literary/Semantic 等语料组装进 Writer prompt。
 // 这里负责生成前的证据、召回、STORM 研究规划、去重、预算和诊断；不做正文生成。
-import { DataBaseGatewayClient } from '../tools/database/database-gateway-client';
-import { getAssociationModelService, getContextWindowModel, getDatabaseGatewayService, getResearchModelService, getStormResearchConfig } from '../../config/env.ts';
+import { LocalCorpus } from '../tools/corpus/local-corpus.ts';
+import { getAssociationModelService, getContextWindowModel, getResearchModelService, getStormResearchConfig } from '../../config/env.ts';
 import { requestJson } from '../tools/http/http-client.ts';
 import {
   MODEL_CONTEXT_WINDOWS, DEFAULT_MODEL_CONTEXT_WINDOW,
@@ -80,13 +80,10 @@ export async function buildArticleContextEngine(input: {
   const warnings: string[] = [];
   const query = readContextQuery(input.request, input.topic);
 
-  // 第 0 步：创建 DataBase Gateway 客户端。
-  // ContentBase 不直接调用 RAGFlow；RAGFlow / web / private corpus 都通过 DataBase Gateway 进入。
-  const gatewayService = getDatabaseGatewayService();
-  if (!gatewayService.baseUrl) {
-    throw new Error('Reality required: DATABASE_GATEWAY_URL is not configured');
-  }
-  const gateway = new DataBaseGatewayClient({ baseUrl: gatewayService.baseUrl, timeout: DEFAULT_EVIDENCE_TIMEOUT_MS || 240000 });
+  // 第 0 步：打开本地语料库（data/writer-engine.sqlite）。
+  // 事实资料、文学范文、词库都从这里检索；项目不依赖任何外部数据库或网关。
+  const gateway = new LocalCorpus();
+  const evidenceRequired = isEvidenceRequired(input.request);
 
   const contextTokenBudget = computeContextTokenBudget(input.request);
   const contextCharBudget = readNumber(
@@ -143,7 +140,7 @@ export async function buildArticleContextEngine(input: {
   // 这里会把主题 query、webQueries、keySources、RAGFlow datasetIds 等交给 DataBase Gateway；
   // DataBase Gateway 再决定如何组合私有库、RAGFlow、web search 等来源。
   // 这一步失败或返回空 Reality 时，生成应当失败，不允许 Writer 凭空写。
-  reportProgress('context_evidence', 'Loading EvidencePack from DataBase Gateway');
+  reportProgress('context_evidence', 'Loading EvidencePack from local corpus');
   const evidencePack = await loadEvidencePack({
     gateway,
     query,
@@ -154,14 +151,19 @@ export async function buildArticleContextEngine(input: {
     warnings,
     realityLimit: retrievalLimits.reality,
   });
-  assertEvidencePack(evidencePack);
+  if (evidenceRequired) {
+    assertEvidencePack(evidencePack);
+  } else if (!Array.isArray(evidencePack?.chunks) || !evidencePack.chunks.length) {
+    // 本地语料里没有相关事实资料：记录告警后继续，由 Writer 基于设定和上下文创作。
+    warnings.push('evidence: local corpus returned no reality chunks; continuing without factual evidence');
+  }
   const evidenceItems = normalizeEvidencePackChunks(evidencePack);
   reportProgress('context_evidence_done', `EvidencePack loaded chunks=${evidenceItems.length}`);
 
   // 第 3 步：调用 DataBase Gateway 的辅助 corpus 接口。
   // 包括 RAGFlow 词库、style contract、author profile、article structure、vector batch。
   // 这些材料帮助写法、语义、作者气质和文风，但不能覆盖 EvidencePack 的事实边界。
-  reportProgress('context_corpus', 'Loading corpus context from DataBase Gateway');
+  reportProgress('context_corpus', 'Loading corpus context from local corpus');
   const corpusItems = await loadCorpusItems({
     gateway,
     query,
@@ -197,7 +199,10 @@ export async function buildArticleContextEngine(input: {
     ...stormItems,
   ].map(normalizeContextItem);
   if (!contextItems.length) {
-    throw new Error('Reality required: EvidencePack returned zero usable Reality chunks');
+    if (evidenceRequired) {
+      throw new Error('Reality required: EvidencePack returned zero usable Reality chunks');
+    }
+    warnings.push('context: no corpus material matched; writing from the request alone');
   }
 
   // 第 5 步：合并后的材料排序、去重。
@@ -220,12 +225,14 @@ export async function buildArticleContextEngine(input: {
     items: diverse,
     charBudget: contextCharBudget,
   });
-  if (!packed.items.length) {
+  if (!packed.items.length && evidenceRequired) {
     throw new Error('Corpus Context required: packed context is empty');
   }
   const packedCounts = countChannels(packed.items);
   const packedChars = countCharsByChannel(packed.items);
-  if ((packedCounts.reality || 0) < 1) {
+  if ((packedCounts.reality || 0) < 1 && !evidenceRequired) {
+    warnings.push('context: no reality material in packed context; facts come from the request only');
+  } else if ((packedCounts.reality || 0) < 1) {
     throw new Error(`Reality required: zero Reality items survived context packing. Stage trace: evidence=${evidenceItems.length}(reality:${stageCountsRaw.reality||0}), ranked=${ranked.length}(reality:${stageCountsRanked.reality||0}), reranked=${reranked.length}(reality:${stageCountsReranked.reality||0}), filtered=${filtered.length}(reality:${stageCountsFiltered.reality||0}), diverse=${diverse.length}(reality:${stageCountsDiverse.reality||0}), packed=${packed.items.length}(reality:${packedCounts.reality||0}), charBudget=${contextCharBudget}`);
   }
 
@@ -305,7 +312,7 @@ export async function buildArticleContextEngine(input: {
 // ---------------------------------------------------------------------------
 
 async function loadCorpusItems(input: {
-  gateway: DataBaseGatewayClient;
+  gateway: LocalCorpus;
   query: string;
   request: ContextEngineRequest;
   limits: RetrievalLimits;
@@ -336,7 +343,7 @@ async function loadCorpusItems(input: {
   ];
 }
 
-async function loadVectorVocabulary(gateway: DataBaseGatewayClient, query: string, limit: number): Promise<Record<string, any>> {
+async function loadVectorVocabulary(gateway: LocalCorpus, query: string, limit: number): Promise<Record<string, any>> {
   // 专用词库向量入口。Gateway 侧只查 DATABASE_LEXICON_RAGFLOW_DATASET_IDS。
   try {
     return await gateway.getJson('/vocabulary/vector-search', {
@@ -451,7 +458,7 @@ function inferOriginTruth(input: {
   return `contentbase.${input.channel}`;
 }
 
-async function loadBatchVectorSearch(gateway: DataBaseGatewayClient, query: string): Promise<ContextItem[]> {
+async function loadBatchVectorSearch(gateway: LocalCorpus, query: string): Promise<ContextItem[]> {
   // 非 Reality 资料池检索：常驻文风、材料组织、主题补充和随机发现并行进入。
   // 这里只扩大资料种类，不把检索种子变成正文写法规则。
   const envQueries = String(process.env.CONTENTBASE_STYLE_QUERIES || '').trim();
@@ -528,7 +535,7 @@ function buildMaterialQueryVariants(query: string): string[] {
 // ---------------------------------------------------------------------------
 
 async function loadEvidencePack(input: {
-  gateway: DataBaseGatewayClient;
+  gateway: LocalCorpus;
   query: string;
   request: ContextEngineRequest;
   warnings: string[];
@@ -1430,7 +1437,7 @@ function isEvidenceChunkItem(item: ContextItem): boolean {
 // Optional expansion: 用外部模型扩展研究/联想 query，失败时静默降级为空。
 // ---------------------------------------------------------------------------
 
-async function associationExpand(topic: string, gateway: DataBaseGatewayClient): Promise<ContextItem[]> {
+async function associationExpand(topic: string, gateway: LocalCorpus): Promise<ContextItem[]> {
   const { baseUrl, apiKey, model } = getAssociationModelService();
   if (!baseUrl || !apiKey) return [];
 
@@ -1529,4 +1536,16 @@ async function expandResearchQueries(topic: string, target: string): Promise<str
   } catch {
     return [];
   }
+}
+
+/**
+ * 事实证据是否为硬性要求。
+ * 默认不强制：本地语料有命中就作为证据使用，没有命中就继续创作（小说写作的常态）。
+ * 请求显式给出 keySources / evidenceQuery.required，或设置 WRITER_REQUIRE_EVIDENCE=1 时才强制。
+ */
+function isEvidenceRequired(request: ContextEngineRequest): boolean {
+  const evidenceQuery = readObject(request.evidenceQuery);
+  if (evidenceQuery.required === true || (request as Record<string, any>).requireEvidence === true) return true;
+  if (extractKeySources(request).length) return true;
+  return ['1', 'true', 'yes', 'on'].includes(String(process.env.WRITER_REQUIRE_EVIDENCE || '').trim().toLowerCase());
 }

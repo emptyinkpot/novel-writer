@@ -2,7 +2,8 @@
 import http from 'node:http';
 import path from 'node:path';
 import { createArticleRuntime } from './article/index.ts';
-import { loadRuntimeEnv, getDatabaseGatewayService } from './config/env.ts';
+import { loadRuntimeEnv } from './config/env.ts';
+import { openWriterDb } from './storage/local-db.ts';
 import { createArticleJobStore } from './jobs/article-job-store.ts';
 import { createArticleJobRunner } from './jobs/article-job-runner.ts';
 import { renderArticleJobConsole } from './ui/article-job-console.ts';
@@ -179,45 +180,20 @@ async function recordFeedbackMemory(input: unknown) {
     throw new Error('userFeedback is required');
   }
 
-  const gateway = getDatabaseGatewayService();
-  if (!gateway.baseUrl) {
-    throw new Error('DataBase Gateway is required for feedback memory');
-  }
-
-  const payload = {
-    topic: String(source.topic || '').trim(),
-    title: String(source.title || '').trim(),
-    verdict: String(source.verdict || '').trim(),
+  const info = openWriterDb().prepare(`INSERT INTO writing_feedback (topic, title, verdict, user_feedback, draft_excerpt, source, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
+    String(source.topic || '').trim(),
+    String(source.title || '').trim(),
+    String(source.verdict || '').trim(),
     userFeedback,
-    draftExcerpt: String(source.draftExcerpt || source.excerpt || '').trim(),
-    source: String(source.source || 'contentbase.feedback_endpoint').trim(),
-  };
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000);
-  let response;
-  try {
-    response = await fetch(`${gateway.baseUrl}/creative/feedback`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...(gateway.apiKey ? { [gateway.headerName]: gateway.apiKey } : {}),
-      },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timeout);
-  }
-  const result = readObject(await response.json().catch(() => ({})));
-  if (!response.ok) {
-    throw new Error(`DataBase Gateway feedback failed: HTTP ${response.status} ${String(result?.error || result?.message || '').slice(0, 160)}`);
-  }
-  const memoryText = typeof result.memoryText === 'string' ? result.memoryText : '';
-  const responseBody = readObject(result.response);
+    String(source.draftExcerpt || source.excerpt || '').trim(),
+    String(source.source || 'writer-engine.feedback_endpoint').trim(),
+    new Date().toISOString(),
+  );
   return {
     stored: true,
-    chars: Number(result.chars || memoryText.length || userFeedback.length),
-    responseId: result.responseId || result.id || responseBody.id || null,
+    chars: userFeedback.length,
+    responseId: Number(info.lastInsertRowid),
   };
 }
 
@@ -254,12 +230,12 @@ if (isDirectExecution()) {
   loadRuntimeEnv();
 
   const args = parseArgs(process.argv);
-  const port = Number(args.get('port') || process.env.CONTENTBASE_CONSOLE_PORT || 5101);
+  const port = Number(args.get('port') || process.env.WRITER_ENGINE_PORT || process.env.CONTENTBASE_CONSOLE_PORT || 19203);
   const server = createContentBaseServer({ workspaceRoot });
   server.requestTimeout = 20 * 60 * 1000;
   server.headersTimeout = 60 * 1000;
   server.keepAliveTimeout = 5 * 1000;
   server.listen(port, () => {
-    console.log(`[ContentBase] Corpus runtime listening on http://127.0.0.1:${port}`);
+    console.log(`[writer-engine] listening on http://127.0.0.1:${port}`);
   });
 }

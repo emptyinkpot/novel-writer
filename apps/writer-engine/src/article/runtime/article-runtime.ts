@@ -12,7 +12,7 @@ import { buildPolishPrompt } from '../agents/prompts/review/polish-prompt.mjs';
 import { buildArticleContextEngine } from '../planning/context-builder.ts';
 import type { ContextEngineResult } from '../planning/types.ts';
 import { RAGFLOW_DATASET_IDS, DEFAULT_EVIDENCE_TIMEOUT_MS } from '../config.ts';
-import { DataBaseGatewayClient } from '../tools/database/database-gateway-client.ts';
+import { LocalCorpus } from '../tools/corpus/local-corpus.ts';
 import { callSingleWriter } from '../tools/llm/writer-model.ts';
 import type { WriterResult } from '../tools/llm/writer-model.ts';
 import type { PostProcessOptions, StyleProfile, StyleViolation } from '../postprocess/index.ts';
@@ -836,7 +836,7 @@ async function loadStandaloneFinalEditorSupplementalMaterials(input: {
   if (!query) return '';
   input.reportProgress('final_editor_materials', 'Loading standalone final-editor materials');
   try {
-    const gateway = new DataBaseGatewayClient({ timeout: DEFAULT_EVIDENCE_TIMEOUT_MS || 240000 });
+    const gateway = new LocalCorpus({ timeout: DEFAULT_EVIDENCE_TIMEOUT_MS || 240000 });
     const evidenceQuery = readObject(input.request.evidenceQuery);
     const datasetIds = Array.isArray(evidenceQuery.ragflowDatasetIds)
       ? evidenceQuery.ragflowDatasetIds.map(String).filter(Boolean)

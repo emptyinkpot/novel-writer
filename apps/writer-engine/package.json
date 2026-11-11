@@ -2,24 +2,28 @@
   "name": "@guga-write/writer-engine",
   "version": "0.1.0",
   "private": true,
-  "description": "Article agent pipeline (migrated from ContentBase)",
+  "description": "Article agent pipeline with local corpus (data/writer-engine.sqlite)",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "start": "node dist/src/server.js --port 5101",
-    "dev": "pnpm run build && node dist/src/server.js --port 5101",
+    "start": "node dist/src/server.js",
+    "dev": "pnpm run build && node dist/src/server.js",
     "mcp": "pnpm --dir clients/mcp run build && node clients/mcp/dist/contentbase-mcp.js",
     "build": "pnpm run clean && tsc -p tsconfig.json && node -e \"require('fs').cpSync('src/article/agents/prompts','dist/src/article/agents/prompts',{recursive:true})\"",
     "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
-    "check": "python tests/contentbase-acceptance.py",
-    "lint": "tsc -p tsconfig.json --noEmit"
+    "check": "pnpm run build && pnpm run test",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "corpus": "node dist/src/cli/corpus.js",
+    "test": "node --test dist/src/tests/local-storage.test.js"
   },
   "dependencies": {
+    "better-sqlite3": "^12.11.1",
     "jieba-wasm": "^2.4.0",
     "ts-node": "^10.9.2"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^20.19.39",
     "typescript": "^6.0.2"
   }

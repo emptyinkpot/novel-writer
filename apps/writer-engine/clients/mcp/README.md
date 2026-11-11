@@ -23,7 +23,7 @@ MCP 工具的接口必须和 ContentBase HTTP API 同步变化。把这个适配
 默认服务地址来自：
 
 ```text
-CONTENTBASE_TEST_BASE_URL=https://contentbase.example.invalid
+CONTENTBASE_TEST_BASE_URL=http://127.0.0.1:19203
 ```
 
 可用工具：
@@ -90,7 +90,7 @@ node E:\My Project\Content-Platform\repos\ContentBase\clients\mcp\dist\contentba
 环境变量只需要指向已部署 ContentBase：
 
 ```text
-CONTENTBASE_TEST_BASE_URL=https://contentbase.example.invalid
+CONTENTBASE_TEST_BASE_URL=http://127.0.0.1:19203
 CONTENTBASE_API_KEY=
 ```
 

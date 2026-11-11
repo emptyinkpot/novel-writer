@@ -1,195 +1,72 @@
-# ContentBase
+# writer-engine
 
-ContentBase 负责把检索到的材料合成上下文，运行文章 agent 全链路，然后返回一篇完整正文、可追踪证据和诊断信息。
+文章 agent 流水线（迁自 ContentBase）：检索本地语料 → 组装上下文 → 规划 → 写作 → 审校，返回完整正文、证据和诊断信息。
 
-核心运行表面只有一条链：
+项目只认识自己：语料、任务、反馈都存在仓库根目录的 `data/writer-engine.sqlite`；模型接口与整个项目共用 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL`（也可用 `CONTENTBASE_LLM_*` 单独指定）。
 
-```text
-Corpus
--> Retrieval
--> Composition
--> Writer
+## 运行
+
+```bash
+pnpm --filter @guga-write/writer-engine dev     # 构建并启动，默认 http://127.0.0.1:19203
+pnpm --filter @guga-write/writer-engine test    # 本地存储与检索测试
 ```
 
-链外的东西不是合法 runtime。
+浏览器打开 `http://127.0.0.1:19203/` 是任务控制台。
 
-## 日常调用
+## 本地语料库
 
-已经部署好的 ContentBase 不需要重新部署就能生成文章。日常调用只走已部署 HTTP 服务或 MCP。
+语料分四个通道：
 
-MCP 入口：
+| 通道 | 用途 |
+| --- | --- |
+| `reality` | 事实资料，作为 EvidencePack 进入上下文 |
+| `literary` | 文学范文，提供文风与写法参考 |
+| `lexicon` | 词库 |
+| `semantic` | 其他语义素材 |
 
-```powershell
-pnpm run mcp
+导入 `.txt` / `.md`（按段落切成约 800 字的块，建 SQLite FTS5 trigram 全文索引，支持中文子串检索）：
+
+```bash
+pnpm --filter @guga-write/writer-engine corpus import <目录> --channel reality
+pnpm --filter @guga-write/writer-engine corpus stats
+pnpm --filter @guga-write/writer-engine corpus search 灯塔 --channel literary
 ```
 
-MCP 源码在 `clients/mcp/`。这是调用适配器，不是产品 runtime；它只请求 `CONTENTBASE_TEST_BASE_URL` 指向的 ContentBase HTTP 服务，不执行 `git`、`ssh`、`docker`、部署或验收脚本。
+事实证据默认不强制：本地语料有命中就作为证据使用，没有命中会记录告警后继续创作。请求里给出 `keySources` / `evidenceQuery.required: true`，或设置 `WRITER_REQUIRE_EVIDENCE=1` 时才强制，证据不足会直接失败。
 
-更多边界见：
-
-```text
-clients/mcp/README.md
-```
-
-可用 MCP 工具：
+## HTTP 接口
 
 ```text
-contentbase_health
-contentbase_collect_materials
-contentbase_generate_article
-contentbase_get_job
-contentbase_get_article_result
-contentbase_polish_article
-contentbase_final_edit_article
-```
-
-直接 HTTP 入口：
-
-```text
-POST /api/content/runtime/generate/article/jobs
-GET  /api/content/runtime/generate/article/jobs/{id}
+GET  /api/health
+POST /api/content/runtime/generate/article             同步生成
+POST /api/content/runtime/generate/article/jobs        异步任务
+GET  /api/content/runtime/generate/article/jobs/{id}   任务进度
 GET  /api/content/runtime/generate/article/jobs/{id}/result
-POST /api/content/runtime/generate/article/materials
-POST /api/content/runtime/polish/article
-POST /api/content/runtime/final-edit/article
+GET  /api/content/runtime/generate/article/jobs/{id}/download
+POST /api/content/runtime/generate/article/materials   只收集资料
+POST /api/content/runtime/polish/article               润色
+POST /api/content/runtime/final-edit/article           终稿编辑
+POST /api/content/runtime/memory/feedback              记录写作反馈
+GET  /api/corpus/diagnostics                           语料与模型配置状态
 ```
 
-`tests/contentbase-acceptance.py` 只用于部署、验收和回归测试。日常生成不要运行这个脚本。
+MCP 适配器在 `clients/mcp/`（`pnpm run mcp`），只调用上面的 HTTP 接口。
 
-## 文档真源
+## 源码导览
 
-```text
-docs/article-engine.md
-  article runtime、12-agent 拓扑、正文修改边界、长度纪律和结果契约。
-
-docs/retrieval-architecture.md
-  DataBase Gateway、RAGFlow、Reality/Literary/Semantic/Lexicon/Structure/Author 通道和 packing 规则。
-
-docs/deploy-and-reproduce.md
-  生产部署、复现、验收、v2.6.0 工程规范化说明和故障排查。
-
-clients/mcp/README.md
-  MCP 适配器用途、边界和 Codex/Claude Code 接入方式。
-```
-
-## 核心 Owner
-
-DataBase Gateway 拥有持久语料、EvidencePack、RAGFlow 召回、来源 metadata 和 citation。
-
-Search/Web provider 只提供临时现实材料，而且必须先经过 DataBase 通道进入 ContentBase。
-
-ContentBase 拥有请求归一化、语料检索、上下文合成和 Writer 调用。
-
-Writer 拥有一次完整正文生成；它不拥有检索，不拥有第二套改写路线。
-
-外部服务配置的源码 owner 是：
-
-```text
-src/config/env.ts
-```
-
-核心 article runtime 在：
-
-```text
-src/article/
-```
-
-核心运行编排在：
-
-```text
-src/article/runtime/article-runtime.ts
-src/article/runtime/article-flow.ts
-```
-
-agent 注册表和工具注册表在：
-
-```text
-src/article/registry/agents.ts
-src/article/registry/tools.ts
-```
-
-## 运行边界
-
-Reality 是必需项。如果缺 `DATABASE_GATEWAY_URL`、缺 EvidencePack，或者 EvidencePack 没有可用 sources/chunks/citations，生成必须 fail closed。
-
-ContentBase 不能直接调用 RAGFlow。RAGFlow 只能通过 DataBase Gateway `/evidence/search` 或 corpus/vector endpoint 进入；被装进 context 时必须保留 provider/provenance metadata。
-
-ContentBase runtime 不允许这些东西：
-
-```text
-fallback body
-fallback provider/model
-alternate Writer route
-hidden Dify workflow
-detached prose police
-detached evaluator chain
-source excerpt article assembly
-local topic/source/category registries
-notebook/material scope fallback
-unbounded revision or rewrite loop
-tail continuation as length completion
-accepting degraded output as success
-```
-
-## Agent 拓扑
-
-文章生成只有三层：
-
-```text
-Planning
--> Writing
--> Post-Writing Review
-```
-
-当前 active agents：
-
-```text
-Planning:
-  fact_agent
-  web_reality_agent
-  divergence_agent
-  meaning_agent
-
-Writing:
-  outline_agent
-  author_agent
-  enrichment_agent
-
-Post-Writing Review:
-  format_reviewer
-  fact_reviewer
-  style_reviewer
-  revision_agent
-  final_editor_agent
-```
-
-详细职责见 `docs/article-engine.md`。
-
-## 部署与验收
-
-生产部署入口：
-
-```powershell
-python scripts/deploy-contentbase-production.py
-```
-
-验收入口：
-
-```powershell
-python tests/contentbase-acceptance.py
-```
-
-常用检查：
-
-```powershell
-pnpm run check
-pnpm run release:check
-```
-
-`tests/contentbase-acceptance.py` 是唯一有 release authority 的 ContentBase check entrypoint。Release acceptance 必须测试已部署 HTTP service，真实调用 DataBase Gateway、Writer 和 async article job，并把生成文章保存到本地。
-
-## 生产位置
-
-生产 runtime 在 RainYun（`rainyun` / `PRIVATE_IP_REMOVED`）。`server-124` 是 public TLS/nginx edge relay，不属于 ContentBase runtime owner。
-
-生产 env 不写进 `Dockerfile`。运行中的 container 只通过 diagnostics 暴露脱敏 env provenance。
+| 路径 | 内容 |
+| --- | --- |
+| `src/server.ts` | HTTP 入口与路由 |
+| `src/article/runtime/` | 生成主流程（article-runtime、article-flow、长度策略、重试） |
+| `src/article/planning/context-builder.ts` | 检索与上下文组装 |
+| `src/article/agents/planning/` | 资料阶段 agents：事实、发散、现实材料、上下文综合 |
+| `src/article/agents/writing/` | 大纲、作者（正文）、补充材料 agents |
+| `src/article/agents/review/` | 事实审查、AI 痕迹、格式、润色、终稿编辑 |
+| `src/article/agents/prompts/` | 各 agent 的提示词 |
+| `src/article/postprocess/` | 格式清理与文风检测 |
+| `src/article/tools/corpus/local-corpus.ts` | 本地语料库 |
+| `src/article/tools/llm/` | 模型调用 |
+| `src/article/tools/storm/` | 可选的 STORM 研究规划（`CONTENTBASE_STORM_RESEARCH_URL`） |
+| `src/jobs/` | 异步任务执行与存储 |
+| `src/storage/local-db.ts` | SQLite 存储 |
+| `src/cli/corpus.ts` | 语料命令行 |

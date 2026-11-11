@@ -10,7 +10,10 @@ export type { ArticleAgentConfig, ArticleAgentName } from '../registry/agents.ts
 export function getArticleAgentConfig(name: ArticleAgentName): ArticleAgentConfig {
   const base = ARTICLE_AGENT_REGISTRY[name];
   const envPrefix = `CONTENTBASE_AGENT_${name.toUpperCase()}`;
-  const requestedProfile = readStringEnv(`${envPrefix}_PROFILE`, base.profile);
+  const explicitProfile = readStringEnv(`${envPrefix}_PROFILE`, '');
+  // 注册表里的 profile 只是偏好：没配置对应模型时退回项目通用模型（LLM_*）。
+  // 通过环境变量显式指定的 profile 不完整则报错，避免配置错误被悄悄掩盖。
+  const requestedProfile = explicitProfile || (isNamedProfileConfigured(base.profile) ? base.profile : 'writer');
   assertNamedProfileUsable(requestedProfile, name);
   return {
     ...base,
@@ -84,6 +87,12 @@ function readBooleanEnv(key: string, fallback: boolean): boolean {
   if (['1', 'true', 'yes', 'on'].includes(value)) return true;
   if (['0', 'false', 'no', 'off'].includes(value)) return false;
   return fallback;
+}
+
+function isNamedProfileConfigured(profile: string): boolean {
+  const normalized = String(profile || '').trim().toUpperCase();
+  if (!normalized || normalized === 'WRITER' || normalized === 'DEFAULT') return true;
+  return ['BASE_URL', 'API_KEY', 'MODEL'].every((suffix) => String(process.env[`CONTENTBASE_LLM_${normalized}_${suffix}`] || '').trim());
 }
 
 function assertNamedProfileUsable(profile: string, agentName: ArticleAgentName): void {

@@ -6,7 +6,7 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "pnpm -r --parallel --filter \"!@guga-write/writer-engine\" run dev",
+    "dev": "pnpm -r --parallel run dev",
     "build": "pnpm -r run build",
     "lint": "pnpm -r run lint"
   },

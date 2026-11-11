@@ -16,7 +16,7 @@ import { runOutlineAgent } from '../agents/writing/outline-agent.ts';
 import { RAGFLOW_DATASET_IDS, DEFAULT_EVIDENCE_TIMEOUT_MS } from '../config.ts';
 import type { ContextEngineResult } from '../planning/context-builder.ts';
 import type { WriterResult } from '../tools/llm/writer-model.ts';
-import { DataBaseGatewayClient } from '../tools/database/database-gateway-client.ts';
+import { LocalCorpus } from '../tools/corpus/local-corpus.ts';
 import type { PostProcessOptions, StyleProfile, StyleViolation } from '../postprocess/index.ts';
 import { buildStyleProfile, findStyleViolations, summarizeStyleViolations } from '../postprocess/index.ts';
 import type { AgentTrace, ChapterDiagnostic, OutlineRoute, ReviewReport, WritingBrief } from '../contracts.ts';
@@ -784,13 +784,13 @@ async function loadSupplementalMaterials(input: {
 }): Promise<string> {
   const query = readSupplementalQuery(input.request, input.topic);
   if (!query) return '';
-  input.reportProgress(input.stagePrefix, 'Loading supplemental DataBase/RAG/Web materials');
+  input.reportProgress(input.stagePrefix, 'Loading supplemental local corpus materials');
   try {
     const supplementalTimeoutMs = input.timeoutMs || readPositiveInteger(
       process.env.CONTENTBASE_SUPPLEMENTAL_EVIDENCE_TIMEOUT_MS,
       30000,
     );
-    const gateway = new DataBaseGatewayClient({ timeout: supplementalTimeoutMs });
+    const gateway = new LocalCorpus({ timeout: supplementalTimeoutMs });
     const evidenceQuery = readObject(input.request.evidenceQuery);
     const datasetIds = Array.isArray(evidenceQuery.ragflowDatasetIds)
       ? evidenceQuery.ragflowDatasetIds.map(String).filter(Boolean)
