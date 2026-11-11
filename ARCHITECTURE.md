@@ -7,13 +7,22 @@
 - 运行时数据统一放在仓库根目录 `data/`（已 gitignore），整个目录拷走即完成搬迁。可用 `NOVEL_WRITER_DATA_DIR` 改位置。
 - 配置只读仓库根目录的 `.env`（可选，已 gitignore）。
 
+## 运行
+
+```bash
+pnpm install
+pnpm dev        # 同时启动 web / api / publisher / writer-engine
+```
+
+publisher 用 Python，需要本机有 `uv`；首次运行会自动建好虚拟环境。
+
 ## 组件
 
 | 包 | 作用 | 端口 |
 | --- | --- | --- |
 | `apps/web` | Next.js 前端，`/api/*` rewrite 到 API | 19200 |
 | `apps/api` | NestJS API：账号、作品、章节、对话、支付 | 19201 |
-| `apps/publisher` | 番茄发布服务：账号登录态、作品扫描、章节发布与编辑 | 19202 |
+| `apps/publisher` | 番茄发布服务（Python：FastAPI + Playwright，uv 管理依赖）：账号登录态、作品扫描、章节发布与编辑、MCP | 19202 |
 | `apps/writer-engine` | 文章 agent 流水线：本地语料检索 → 规划 → 写作 → 审校 | 19203 |
 | `packages/shared` | 共享类型 | — |
 
@@ -46,10 +55,10 @@ publisher 读取 `data/novel-writer.sqlite` 的 `nw_chapters` 作为待发布章
 
 ## 番茄登录态
 
-publisher 的所有需要登录的操作（扫描、同步章节、发布、读取/编辑远端章节）都经过 `SessionGuardedFanqieDriver`：
+publisher 的所有需要登录的操作（扫描、同步章节、发布、读取/编辑远端章节）都经过 `apps/publisher/src/fanqie_publisher/guard.py`：
 
 1. 执行前快速检查（headless，不弹窗，结果缓存 10 分钟）。
-2. 判定为过期（页面被重定向到登录页）时，打开番茄登录窗口；轮询 profile cookie，检测到新的登录态后校验 uid 与原账号一致，写回 `data/publisher.sqlite` 并自动关窗；再用页面检查确认可用，然后执行任务。
+2. 判定为过期（页面被重定向到登录页）时，打开番茄登录窗口；轮询窗口 cookie，检测到新的登录态后校验 uid 与原账号一致，写回 `data/publisher.sqlite` 并自动关窗；再用页面检查确认可用，然后执行任务。
 3. 执行中失败时复查登录态，确认是过期导致的才重新登录并**重试一次**；其他失败原样返回。
 4. 网络错误等无法判定的情况不会触发登录；同一账号同时只开一个登录窗口；登录取消、超时、换了别的番茄账号都会让任务失败并说明原因。
 5. 后台巡检只更新状态（`GET /sessions/state`），从不弹窗。

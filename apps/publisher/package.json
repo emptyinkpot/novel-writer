@@ -1,42 +1,13 @@
 {
   "name": "@guga-write/publisher",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Fanqie platform publisher (migrated from fanqie-service)",
-  "type": "module",
-  "main": "dist/src/public-api.js",
-  "types": "dist/src/public-api.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/src/public-api.d.ts",
-      "import": "./dist/src/public-api.js"
-    }
-  },
+  "description": "番茄发布服务（uv 管理依赖）",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "dev:mcp": "tsx src/mcp/server.ts",
-    "start": "node dist/src/index.js",
-    "start:mcp": "node dist/src/mcp/server.js",
-    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
-    "build": "pnpm run clean && tsc -p tsconfig.json && node -e \"const fs=require('fs'); const path=require('path'); const src='src/runtime/browser'; const dst='dist/src/runtime/browser'; fs.mkdirSync(dst,{recursive:true}); for (const file of fs.readdirSync(src)) if (file.endsWith('.mjs')) fs.copyFileSync(path.join(src,file), path.join(dst,file));\"",
-    "test": "node --test dist/test/service.test.js dist/test/mcp-tools.test.js dist/test/session-guard.test.js",
-    "check": "pnpm run build && pnpm run test",
-    "lint": "tsc -p tsconfig.json --noEmit"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "better-sqlite3": "^12.10.0",
-    "express": "^5.2.1",
-    "playwright": "^1.60.0",
-    "zod": "^4.3.6"
-  },
-  "devDependencies": {
-    "@types/express": "^5.0.6",
-    "@types/node": "^20.19.39",
-    "tsx": "^4.21.0",
-    "typescript": "^6.0.2"
-  },
-  "engines": {
-    "node": ">=20"
+    "dev": "uv run fanqie-publisher",
+    "start": "uv run fanqie-publisher",
+    "mcp": "uv run fanqie-publisher-mcp",
+    "build": "uv sync",
+    "test": "uv run pytest -q"
   }
 }
