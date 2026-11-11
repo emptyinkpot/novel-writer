@@ -24,8 +24,8 @@ async def client(tmp_path: Path):
 
 
 def test_tool_catalog_is_complete():
-    assert len(TOOLS) == 28
-    assert len({t.name for t in TOOLS}) == 28
+    assert len(TOOLS) == 38
+    assert len({t.name for t in TOOLS}) == 38
 
 
 async def test_list_tools_are_wrapped(client):
@@ -62,8 +62,17 @@ async def test_stdio_handshake(tmp_path: Path):
         async with ClientSession(read, write) as session:
             await session.initialize()
             tools = (await session.list_tools()).tools
-            assert len(tools) == 28
+            assert len(tools) == 38
             result = await session.call_tool("account.list", {})
             assert result.is_error is False and result.structured_content == {"accounts": []}
             failed = await session.call_tool("publish.job.get", {"jobId": "nope"})
             assert failed.is_error is True
+
+
+async def test_draft_tools(client):
+    listed = await call_tool(client, "draft.list", {"accountId": "acc", "bookId": "7001"})
+    assert listed["drafts"][0]["itemId"] == "d1"
+    detail = await call_tool(client, "draft.get", {"accountId": "acc", "bookId": "7001", "itemId": "d1"})
+    assert detail["contentText"] == "正文"
+    deleted = await call_tool(client, "draft.delete", {"accountId": "acc", "bookId": "7001", "itemId": "d1", "title": "测试草稿"})
+    assert deleted["deleted"] is True

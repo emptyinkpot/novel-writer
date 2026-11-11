@@ -16,7 +16,7 @@ from .driver import FanqieDriver, PlaywrightFanqieDriver
 from .errors import ServiceError
 from .guard import SessionGuardedDriver, session_watch_loop
 from .reader import FanqieReader
-from .services import AccountLock, EditService, PlanningService, PublishService, ScanService, SessionService
+from .services import AccountLock, BackgroundTasks, CatalogService, DraftService, EditService, PlanningService, PublishService, ScanService, SessionService, catalog_scan_loop, create_catalog_router
 from .store import PublicationStore, now_iso
 
 
@@ -32,6 +32,8 @@ class Container:
     edit: EditService
     planning: PlanningService
     reader: FanqieReader
+    drafts: DraftService
+    catalog: CatalogService
 
 
 def build_container(config: Config | None = None, store: PublicationStore | None = None,
@@ -41,10 +43,12 @@ def build_container(config: Config | None = None, store: PublicationStore | None
     inner = inner_driver or PlaywrightFanqieDriver(config, BrowserRuntime(config, store))
     driver = SessionGuardedDriver(inner, cache_seconds=config.session_cache_seconds, auto_relogin=config.auto_relogin)
     lock = AccountLock()
-    scan = ScanService(driver, store, lock)
-    edit = EditService(driver, lock)
+    background = BackgroundTasks()
+    scan = ScanService(driver, store, lock, background)
+    edit = EditService(driver, lock, store, background, scan)
+    catalog = CatalogService(scan, store, background)
     return Container(config, store, driver, lock, SessionService(driver), scan, PublishService(driver, lock), edit,
-                     PlanningService(store, scan, edit), FanqieReader())
+                     PlanningService(store, scan, edit), FanqieReader(), DraftService(driver, lock, store, background, scan), catalog)
 
 
 def ok(data: Any, status: int = 200) -> JSONResponse:
@@ -87,14 +91,19 @@ def create_app(container: Container | None = None, *, start_watch: bool = True) 
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        task = None
+        tasks = []
+        async def account_ids() -> list[str]:
+            return [a["id"] for a in await c.store.list_fanqie_accounts() if a["status"] == "active"]
+
         if start_watch and c.config.session_watch_minutes > 0:
-            async def account_ids() -> list[str]:
-                return [a["id"] for a in await c.store.list_fanqie_accounts() if a["status"] == "active"]
-            task = asyncio.create_task(session_watch_loop(c.driver, account_ids, c.lock.run, c.config.session_watch_minutes * 60))
+            tasks.append(asyncio.create_task(session_watch_loop(c.driver, account_ids, c.lock.run, c.config.session_watch_minutes * 60)))
+        if start_watch and c.config.catalog_scan_minutes > 0:
+            tasks.append(asyncio.create_task(catalog_scan_loop(c.catalog, account_ids, c.config.catalog_scan_minutes * 60)))
         yield
-        if task:
+        for task in tasks:
             task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     app = FastAPI(title="fanqie-publisher", version=c.config.version, lifespan=lifespan)
     app.state.container = c
@@ -107,6 +116,8 @@ def create_app(container: Container | None = None, *, start_watch: bool = True) 
     @app.exception_handler(Exception)
     async def _unexpected(_request: Request, error: Exception):
         return JSONResponse({"success": False, "code": "internal_error", "error": str(error), "details": None}, status_code=500)
+
+    app.include_router(create_catalog_router(c.catalog))
 
     # ---- 健康与账号 ----
 
@@ -131,6 +142,11 @@ def create_app(container: Container | None = None, *, start_watch: bool = True) 
     async def session_check(account_id: str):
         return ok(await c.driver.check_session(account_id))
 
+    @app.post("/accounts/{account_id}/display-name")
+    async def account_display_name(account_id: str, request: Request):
+        data = await body(request)
+        return ok(c.store.set_account_display_name(account_id, str(data.get("displayName") or "")))
+
     @app.get("/sessions/state")
     async def sessions_state():
         return ok(c.driver.list_states())
@@ -151,7 +167,8 @@ def create_app(container: Container | None = None, *, start_watch: bool = True) 
 
     @app.post("/chapters/remote/sync")
     async def chapters_sync(request: Request):
-        return ok(await c.scan.sync_remote_chapters(await body(request)))
+        data = await body(request)
+        return ok(await c.scan.cached_remote_chapters(data["accountId"], str(data["bookId"]), force=data.get("refresh") is True))
 
     # ---- 发布 ----
 
@@ -222,7 +239,8 @@ def create_app(container: Container | None = None, *, start_watch: bool = True) 
 
     @app.get("/remote/chapters/{book_id}/{item_id}")
     async def remote_chapter(book_id: str, item_id: str, request: Request):
-        return ok(await c.edit.get_remote_chapter({"accountId": q(request, "accountId", "account_id"), "bookId": book_id, "itemId": item_id}))
+        data = {"accountId": q(request, "accountId", "account_id"), "bookId": book_id, "itemId": item_id}
+        return ok(await c.edit.cached_remote_chapter(data, force=q(request, "refresh") == "true"))
 
     @app.post("/edit/chapter")
     async def edit_chapter(request: Request):
@@ -260,6 +278,37 @@ def create_app(container: Container | None = None, *, start_watch: bool = True) 
             return ok(await c.planning.compare_database_chapter(await body(request)))
         except Exception as error:  # noqa: BLE001
             raise store_error(error) from error
+
+    # ---- 草稿箱 ----
+
+    @app.get("/drafts")
+    async def drafts_list(request: Request):
+        data = {"accountId": q(request, "accountId", "account_id"), "bookId": q(request, "bookId", "book_id")}
+        return ok(await c.drafts.cached_list(data, force=q(request, "refresh") == "true"))
+
+    @app.get("/drafts/{book_id}/{item_id}")
+    async def drafts_get(book_id: str, item_id: str, request: Request):
+        data = {"accountId": q(request, "accountId", "account_id"), "bookId": book_id, "itemId": item_id}
+        return ok(await c.drafts.cached_get(data, force=q(request, "refresh") == "true"))
+
+    @app.post("/drafts")
+    async def drafts_save(request: Request):
+        return ok(await c.drafts.save(await body(request)))
+
+    @app.post("/drafts/{book_id}/{item_id}")
+    async def drafts_update(book_id: str, item_id: str, request: Request):
+        return ok(await c.drafts.update({**await body(request), "bookId": book_id, "itemId": item_id}))
+
+    @app.delete("/drafts/{book_id}/{item_id}")
+    async def drafts_delete(book_id: str, item_id: str, request: Request):
+        data = await body(request)
+        data.setdefault("accountId", q(request, "accountId", "account_id"))
+        data.setdefault("title", q(request, "title"))
+        return ok(await c.drafts.delete({**data, "bookId": book_id, "itemId": item_id}))
+
+    @app.post("/drafts/{book_id}/{item_id}/publish")
+    async def drafts_publish(book_id: str, item_id: str, request: Request):
+        return ok(await c.drafts.publish({**await body(request), "bookId": book_id, "itemId": item_id}))
 
     # ---- 本地发布数据 ----
 

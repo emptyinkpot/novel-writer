@@ -1,8 +1,9 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UserService } from '../user/user.service';
 import { WechatService } from './wechat.service';
 import * as crypto from 'crypto';
+import { LOCAL_ADMIN_EMAIL, LOCAL_ADMIN_ENABLED, LOCAL_ADMIN_NAME } from '../env';
 
 @Injectable()
 export class AuthService {
@@ -25,6 +26,40 @@ export class AuthService {
     await this.userService.save(user);
     const token = this.generateToken({ id: user.id, email: user.email });
     return { access_token: token };
+  }
+
+  async ensureConfiguredLocalAdmin() {
+    if (!LOCAL_ADMIN_ENABLED) return null;
+    let user = await this.userService.findByEmail(LOCAL_ADMIN_EMAIL);
+    if (user && user.provider !== 'local-admin') {
+      throw new ConflictException(`本地管理员邮箱已被普通账号占用：${LOCAL_ADMIN_EMAIL}`);
+    }
+    if (!user) {
+        user = await this.userService.create({
+        email: LOCAL_ADMIN_EMAIL,
+        fullName: LOCAL_ADMIN_NAME,
+        provider: 'local-admin',
+        userType: 'free',
+        status: 'active',
+      });
+    } else if (user.fullName !== LOCAL_ADMIN_NAME) {
+      user.fullName = LOCAL_ADMIN_NAME;
+      user.status = 'active';
+      await this.userService.save(user);
+    }
+    return user;
+  }
+
+  async localBootstrap() {
+    if (!LOCAL_ADMIN_ENABLED) throw new UnauthorizedException('本地管理员登录未启用');
+    const user = await this.ensureConfiguredLocalAdmin();
+    if (!user) throw new UnauthorizedException('本地管理员登录未启用');
+    user.lastSignInAt = new Date();
+    await this.userService.save(user);
+    return {
+      access_token: this.generateToken({ id: user.id, email: user.email }),
+      user: { id: user.id, email: user.email, name: user.fullName || LOCAL_ADMIN_NAME, provider: user.provider },
+    };
   }
 
   async register(email: string, password: string, fullName?: string) {

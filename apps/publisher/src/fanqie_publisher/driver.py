@@ -49,6 +49,12 @@ class FanqieDriver(Protocol):
     async def publish_chapter(self, data: dict[str, Any]) -> dict[str, Any]: ...
     async def get_remote_chapter(self, data: dict[str, Any]) -> dict[str, Any]: ...
     async def edit_remote_chapter(self, data: dict[str, Any]) -> dict[str, Any]: ...
+    async def list_drafts(self, data: dict[str, Any]) -> list[dict[str, Any]]: ...
+    async def get_draft(self, data: dict[str, Any]) -> dict[str, Any]: ...
+    async def save_draft(self, data: dict[str, Any]) -> dict[str, Any]: ...
+    async def update_draft(self, data: dict[str, Any]) -> dict[str, Any]: ...
+    async def delete_draft(self, data: dict[str, Any]) -> dict[str, Any]: ...
+    async def publish_draft(self, data: dict[str, Any]) -> dict[str, Any]: ...
 
 
 def sanitize_evidence(value: Any) -> dict[str, Any]:
@@ -315,3 +321,45 @@ class PlaywrightFanqieDriver:
             "before": result.get("before"), "after": result.get("after"), "listEntry": result.get("listEntry"),
             "verification": result.get("verification"), "evidence": sanitize_evidence(result),
         }
+
+    # ---- 草稿箱 ----
+
+    async def list_drafts(self, data: dict[str, Any]) -> list[dict[str, Any]]:
+        book_id = str(data["bookId"])
+        items = await self._run(data["accountId"], lambda page, _a: pages.list_drafts(
+            page, book_id, data.get("chapterManageUrl")))
+        return [{"accountId": data["accountId"], "bookId": book_id, **item} for item in items]
+
+    async def get_draft(self, data: dict[str, Any]) -> dict[str, Any]:
+        detail = await self._run(data["accountId"], lambda page, _a: pages.get_draft(page, str(data["bookId"]), str(data["itemId"])))
+        return {
+            "accountId": data["accountId"], "bookId": str(data["bookId"]), "itemId": str(data["itemId"]),
+            "title": str(detail.get("title") or ""), "chapterNumber": positive_or_none(detail.get("chapterNumber")),
+            "wordCount": positive_or_none(detail.get("wordCount")), "contentText": str(detail.get("contentText") or ""),
+            "editUrl": detail.get("editUrl"), "responseCode": detail.get("responseCode"),
+        }
+
+    async def save_draft(self, data: dict[str, Any]) -> dict[str, Any]:
+        result = await self._run(data["accountId"], lambda page, _a: pages.save_new_draft(
+            page, str(data["bookId"]), str(data["title"]), str(data["content"]), data.get("chapterNumber")))
+        return {"accountId": data["accountId"], **result}
+
+    async def update_draft(self, data: dict[str, Any]) -> dict[str, Any]:
+        result = await self._run(data["accountId"], lambda page, _a: pages.update_draft(
+            page, str(data["bookId"]), str(data["itemId"]), data.get("title"), data.get("content")))
+        return {"accountId": data["accountId"], **result}
+
+    async def delete_draft(self, data: dict[str, Any]) -> dict[str, Any]:
+        result = await self._run(data["accountId"], lambda page, _a: pages.delete_draft(
+            page, str(data["bookId"]), str(data["itemId"]), str(data["title"])))
+        return {"accountId": data["accountId"], **result}
+
+    async def publish_draft(self, data: dict[str, Any]) -> dict[str, Any]:
+        evidence_dir = self.config.acceptance_dir / "publish"
+        result = await self._run(
+            data["accountId"],
+            lambda page, account: pages.publish_draft(page, str(data["bookId"]), str(data["itemId"]), int(data["chapterNumber"]),
+                                                      data.get("dryRun") is True, account.id, evidence_dir),
+            headless=data.get("headless") is not False,
+        )
+        return {"accountId": data["accountId"], **result}

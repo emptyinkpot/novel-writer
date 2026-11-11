@@ -101,6 +101,26 @@ TOOLS = [
     Tool("database.publish.chapter", "解析作品库里待发布的章节", "GET", "/database/publish-chapter",
          obj(accountId=S, bookId=S, localWorkId=ID, chapterId=ID, chapterNumber=N, idempotencyKey=S, requestId=S),
          query=["accountId", "bookId", "localWorkId", "chapterId", "chapterNumber", "idempotencyKey", "requestId"], read_only=True),
+    Tool("catalog.accounts", "列出账号及已扫描的作品总览", "GET", "/catalog/accounts", obj(), read_only=True),
+    Tool("catalog.scan", "扫描指定账号的全部作品和各作品草稿箱", "POST", "/catalog/accounts/{accountId}/scan",
+         obj(["accountId"], accountId=S)),
+    Tool("catalog.get", "读取账号及其作品对象总览", "GET", "/catalog/accounts/{accountId}",
+         obj(["accountId"], accountId=S), read_only=True),
+    Tool("catalog.work", "读取指定账号下的作品和该作品草稿对象", "GET", "/catalog/accounts/{accountId}/works/{bookId}",
+         obj(["accountId", "bookId"], accountId=S, bookId=S), read_only=True),
+    Tool("draft.list", "列出作品草稿箱里的全部草稿（标题、字数、草稿 ID）", "GET", "/drafts", obj(["accountId", "bookId"], accountId=S, bookId=S),
+         query=["accountId", "bookId"], wrap="drafts", read_only=True),
+    Tool("draft.get", "读取一篇草稿的标题和完整正文", "GET", "/drafts/{bookId}/{itemId}",
+         obj(["accountId", "bookId", "itemId"], accountId=S, bookId=S, itemId=S), query=["accountId"], read_only=True),
+    Tool("draft.save", "在作品草稿箱新建一篇草稿（不发布），保存后读回核对", "POST", "/drafts",
+         obj(["accountId", "bookId", "title", "content"], accountId=S, bookId=S, title=S, content=S, chapterNumber=N)),
+    Tool("draft.update", "修改草稿的标题和/或正文，保存后读回核对", "POST", "/drafts/{bookId}/{itemId}",
+         obj(["accountId", "bookId", "itemId"], accountId=S, bookId=S, itemId=S, title=S, content=S)),
+    Tool("draft.delete", "按草稿 ID 删除草稿；标题必须与草稿箱里一致才会删除", "DELETE", "/drafts/{bookId}/{itemId}",
+         obj(["accountId", "bookId", "itemId", "title"], accountId=S, bookId=S, itemId=S, title=S), destructive=True),
+    Tool("draft.publish", "把草稿作为指定章节号发布（dryRun 只检查不提交）", "POST", "/drafts/{bookId}/{itemId}/publish",
+         obj(["accountId", "bookId", "itemId", "chapterNumber"], accountId=S, bookId=S, itemId=S, chapterNumber=N, dryRun=B, headless=B),
+         destructive=True),
 ]
 TOOLS_BY_NAME = {tool.name: tool for tool in TOOLS}
 
@@ -124,6 +144,8 @@ async def call_tool(client: httpx.AsyncClient, name: str, arguments: dict[str, A
     if tool.method == "GET":
         params = {k: str(args[k]) for k in tool.query if args.get(k) not in (None, "")}
         response = await client.get(path, params=params)
+    elif tool.method == "DELETE":
+        response = await client.request("DELETE", path, json=args)
     else:
         response = await client.post(path, json=args)
     payload = response.json()

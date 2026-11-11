@@ -20,6 +20,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS fanqie_accounts (
   account_id TEXT PRIMARY KEY,
   name TEXT,
+  display_name TEXT,
   aliases TEXT NOT NULL DEFAULT '[]',
   status TEXT NOT NULL DEFAULT 'active',
   cookies_payload TEXT,
@@ -52,6 +53,20 @@ CREATE TABLE IF NOT EXISTS fanqie_works (
   raw TEXT,
   scanned_at TEXT NOT NULL,
   UNIQUE (account_id, work_id)
+);
+CREATE TABLE IF NOT EXISTS fanqie_catalog_snapshots (
+  account_id TEXT PRIMARY KEY,
+  scanned_at TEXT NOT NULL,
+  snapshot_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS fanqie_content_cache (
+  account_id TEXT NOT NULL,
+  book_id TEXT NOT NULL,
+  cache_type TEXT NOT NULL,
+  item_id TEXT NOT NULL DEFAULT '',
+  cached_at TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  PRIMARY KEY (account_id, book_id, cache_type, item_id)
 );
 CREATE TABLE IF NOT EXISTS fanqie_remote_chapters (
   account_id TEXT NOT NULL,
@@ -173,6 +188,9 @@ class PublicationStore:
         self.db = connect(db_path)
         self.db.execute("PRAGMA journal_mode = WAL")
         self.db.executescript(SCHEMA)
+        account_columns = {row["name"] for row in self.db.execute("PRAGMA table_info(fanqie_accounts)")}
+        if "display_name" not in account_columns:
+            self.db.execute("ALTER TABLE fanqie_accounts ADD COLUMN display_name TEXT")
         self.chapters = chapters or SqliteLibraryChapterSource(library_db or Path(str(db_path)).with_name("novel-writer.sqlite"))
 
     # ---- 账号与 cookie ----
@@ -183,6 +201,7 @@ class PublicationStore:
             "accountId": row["account_id"],
             "id": row["account_id"],
             "name": row["name"],
+            "displayName": row["display_name"],
             "aliases": parse_json(row["aliases"], []),
             "status": row["status"],
             "cookieChecksum": row["cookie_checksum"],
@@ -220,9 +239,22 @@ class PublicationStore:
             raise ServiceError("invalid_account", "accountId is required", 400)
         t = now_iso()
         self.db.execute(
-            "INSERT INTO fanqie_accounts (account_id, name, aliases, created_at, updated_at) VALUES (?, ?, ?, ?, ?) "
+            "INSERT INTO fanqie_accounts (account_id, name, display_name, aliases, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(account_id) DO NOTHING",
-            (account_id, name or account_id, json.dumps(aliases or [], ensure_ascii=False), t, t),
+            (account_id, name or account_id, name or account_id, json.dumps(aliases or [], ensure_ascii=False), t, t),
+        )
+        return self.get_account(account_id)  # type: ignore[return-value]
+
+    def set_account_display_name(self, account_id: str, display_name: str) -> dict[str, Any]:
+        account = self.get_account(account_id)
+        if not account:
+            raise ServiceError("fanqie_account_missing", f"本地没有番茄账号: {account_id}", 404)
+        value = display_name.strip()
+        if not value:
+            raise ServiceError("invalid_account", "displayName is required", 400)
+        self.db.execute(
+            "UPDATE fanqie_accounts SET display_name = ?, updated_at = ? WHERE account_id = ?",
+            (value, now_iso(), account_id),
         )
         return self.get_account(account_id)  # type: ignore[return-value]
 
@@ -237,9 +269,10 @@ class PublicationStore:
         self.ensure_account(account_id, name, aliases)
         t = now_iso()
         self.db.execute(
-            "UPDATE fanqie_accounts SET name = COALESCE(?, name), aliases = COALESCE(?, aliases), cookies_payload = ?, "
+            "UPDATE fanqie_accounts SET name = COALESCE(?, name), display_name = COALESCE(?, display_name), aliases = COALESCE(?, aliases), cookies_payload = ?, "
             "cookie_checksum = ?, cookie_count = ?, expires_summary = ?, session_synced_at = ?, updated_at = ? WHERE account_id = ?",
             (
+                name,
                 name,
                 json.dumps(aliases, ensure_ascii=False) if aliases is not None else None,
                 json.dumps(cookies_payload, ensure_ascii=False),
@@ -257,7 +290,8 @@ class PublicationStore:
         return [
             {
                 "id": row["accountId"],
-                "name": row["name"],
+                "name": row["displayName"] or row["name"],
+                "displayName": row["displayName"] or row["name"],
                 "aliases": row["aliases"],
                 "status": "disabled" if row["status"] == "disabled" else "active",
                 "cookiesStorageType": "external",
@@ -384,6 +418,56 @@ class PublicationStore:
             self.db.execute("ROLLBACK")
             raise
         return {"syncedAt": synced_at, "count": len(result), "works": result}
+
+    def get_catalog_snapshot(self, account_id: str) -> dict[str, Any] | None:
+        row = self.db.execute(
+            "SELECT snapshot_json FROM fanqie_catalog_snapshots WHERE account_id = ?", (account_id,)
+        ).fetchone()
+        value = parse_json(row["snapshot_json"], None) if row else None
+        return value if isinstance(value, dict) else None
+
+    async def save_catalog_snapshot(self, account_id: str, snapshot: dict[str, Any]) -> None:
+        scanned_at = str(snapshot.get("scannedAt") or now_iso())
+        self.db.execute(
+            "INSERT INTO fanqie_catalog_snapshots (account_id, scanned_at, snapshot_json) VALUES (?, ?, ?) "
+            "ON CONFLICT(account_id) DO UPDATE SET scanned_at = excluded.scanned_at, snapshot_json = excluded.snapshot_json",
+            (account_id, scanned_at, json.dumps(snapshot, ensure_ascii=False)),
+        )
+
+    def get_content_cache(self, account_id: str, book_id: str, cache_type: str,
+                          item_id: str = "") -> dict[str, Any] | None:
+        row = self.db.execute(
+            "SELECT cached_at, payload_json FROM fanqie_content_cache "
+            "WHERE account_id = ? AND book_id = ? AND cache_type = ? AND item_id = ?",
+            (account_id, book_id, cache_type, item_id),
+        ).fetchone()
+        payload = parse_json(row["payload_json"], None) if row else None
+        return {"cachedAt": row["cached_at"], "data": payload} if row and payload is not None else None
+
+    def save_content_cache(self, account_id: str, book_id: str, cache_type: str,
+                           data: Any, item_id: str = "") -> str:
+        cached_at = now_iso()
+        self.db.execute(
+            "INSERT INTO fanqie_content_cache "
+            "(account_id, book_id, cache_type, item_id, cached_at, payload_json) VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(account_id, book_id, cache_type, item_id) DO UPDATE SET "
+            "cached_at = excluded.cached_at, payload_json = excluded.payload_json",
+            (account_id, book_id, cache_type, item_id, cached_at, json.dumps(data, ensure_ascii=False)),
+        )
+        return cached_at
+
+    def delete_content_cache(self, account_id: str, book_id: str, cache_type: str,
+                            item_id: str | None = None) -> None:
+        if item_id is None:
+            self.db.execute(
+                "DELETE FROM fanqie_content_cache WHERE account_id = ? AND book_id = ? AND cache_type = ?",
+                (account_id, book_id, cache_type),
+            )
+        else:
+            self.db.execute(
+                "DELETE FROM fanqie_content_cache WHERE account_id = ? AND book_id = ? AND cache_type = ? AND item_id = ?",
+                (account_id, book_id, cache_type, item_id),
+            )
 
     async def sync_fanqie_remote_chapters(self, account_id: str, book_id: str, chapters: list[dict[str, Any]]) -> dict[str, Any]:
         synced_at = now_iso()

@@ -14,7 +14,7 @@ from fanqie_publisher.store import PublicationStore, now_iso
 def make_config(tmp: Path) -> Config:
     return Config(host="127.0.0.1", port=0, data_dir=tmp, service_dir=tmp / "publisher", publisher_db=tmp / "publisher.sqlite",
                   library_db=tmp / "novel-writer.sqlite", session_cache_seconds=600, auto_relogin=True,
-                  session_watch_minutes=0, login_timeout_seconds=600)
+                  session_watch_minutes=0, catalog_scan_minutes=0, login_timeout_seconds=600)
 
 
 def make_library(path: Path, chapters: list[tuple[str, str]], work_id: int = 1) -> None:
@@ -78,6 +78,31 @@ class FakeDriver:
         self.calls.append("detail")
         return {"accountId": data["accountId"], "bookId": data["bookId"], "itemId": data["itemId"], "title": "第1章 雾起",
                 "contentText": "旧正文", "wordCount": 3}
+
+    async def list_drafts(self, data):
+        self.calls.append("drafts")
+        return [{"accountId": data["accountId"], "bookId": data["bookId"], "itemId": "d1", "title": "第 章 测试草稿", "wordCount": 12}]
+
+    async def get_draft(self, data):
+        self.calls.append("draft")
+        return {"accountId": data["accountId"], "bookId": data["bookId"], "itemId": data["itemId"], "title": "测试草稿", "contentText": "正文"}
+
+    async def save_draft(self, data):
+        self.calls.append("save_draft")
+        return {"accountId": data["accountId"], "bookId": data["bookId"], "itemId": "d-new", "verification": {"verified": True}}
+
+    async def update_draft(self, data):
+        self.calls.append("update_draft")
+        return {"accountId": data["accountId"], "bookId": data["bookId"], "itemId": data["itemId"], "verification": {"verified": True}}
+
+    async def delete_draft(self, data):
+        self.calls.append("delete_draft")
+        return {"accountId": data["accountId"], "bookId": data["bookId"], "itemId": data["itemId"], "deleted": True}
+
+    async def publish_draft(self, data):
+        self.calls.append("publish_draft")
+        return {"accountId": data["accountId"], "bookId": data["bookId"], "itemId": data["itemId"],
+                "dryRun": data.get("dryRun") is True, "success": True, "problems": []}
 
     async def edit_remote_chapter(self, data):
         self.calls.append("edit")

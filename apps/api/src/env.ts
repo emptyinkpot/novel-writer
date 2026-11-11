@@ -9,7 +9,12 @@ export const REPO_ROOT = resolve(__dirname, '../../..');
 const rootEnv = resolve(REPO_ROOT, '.env');
 if (existsSync(rootEnv)) {
   try {
-    process.loadEnvFile(rootEnv);
+    for (const line of readFileSync(rootEnv, 'utf8').replace(/^\uFEFF/, '').split(/\r?\n/)) {
+      const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+      if (!match || process.env[match[1]] !== undefined) continue;
+      const value = match[2].replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, '$1$2');
+      process.env[match[1]] = value;
+    }
   } catch {
     /* 格式错误时忽略，交给显式环境变量 */
   }
@@ -27,6 +32,11 @@ export function requiredEnv(name: string): string {
   }
   return value;
 }
+
+export const LOCAL_ADMIN_ENABLED = optionalEnv('NOVEL_WRITER_LOCAL_ADMIN_ENABLED') === '1';
+export const LOCAL_ADMIN_EMAIL = optionalEnv('NOVEL_WRITER_LOCAL_ADMIN_EMAIL') ?? 'admin@local';
+export const LOCAL_ADMIN_NAME = optionalEnv('NOVEL_WRITER_LOCAL_ADMIN_NAME') ?? 'Local Admin';
+export const FANQIE_SERVICE_URL = (optionalEnv('FANQIE_SERVICE_URL') ?? 'http://127.0.0.1:19202').replace(/\/+$/, '');
 
 export const DATA_DIR = resolve(optionalEnv('NOVEL_WRITER_DATA_DIR') ?? resolve(REPO_ROOT, 'data'));
 mkdirSync(DATA_DIR, { recursive: true });

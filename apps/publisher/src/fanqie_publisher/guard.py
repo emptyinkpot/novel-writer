@@ -86,7 +86,7 @@ class SessionGuardedDriver:
     async def scan_works(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         if not data.get("accountId"):
             return await self.inner.scan_works(data)
-        return await self._guard(data["accountId"], lambda: self.inner.scan_works(data))
+        return await self._guard(data["accountId"], lambda: self.inner.scan_works(data), passive=data.get("passive") is True)
 
     async def sync_remote_chapters(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         return await self._guard(data["accountId"], lambda: self.inner.sync_remote_chapters(data))
@@ -100,9 +100,27 @@ class SessionGuardedDriver:
     async def edit_remote_chapter(self, data: dict[str, Any]) -> dict[str, Any]:
         return await self._guard(data["accountId"], lambda: self.inner.edit_remote_chapter(data))
 
+    async def list_drafts(self, data: dict[str, Any]) -> list[dict[str, Any]]:
+        return await self._guard(data["accountId"], lambda: self.inner.list_drafts(data), passive=data.get("passive") is True)
+
+    async def get_draft(self, data: dict[str, Any]) -> dict[str, Any]:
+        return await self._guard(data["accountId"], lambda: self.inner.get_draft(data))
+
+    async def save_draft(self, data: dict[str, Any]) -> dict[str, Any]:
+        return await self._guard(data["accountId"], lambda: self.inner.save_draft(data))
+
+    async def update_draft(self, data: dict[str, Any]) -> dict[str, Any]:
+        return await self._guard(data["accountId"], lambda: self.inner.update_draft(data))
+
+    async def delete_draft(self, data: dict[str, Any]) -> dict[str, Any]:
+        return await self._guard(data["accountId"], lambda: self.inner.delete_draft(data))
+
+    async def publish_draft(self, data: dict[str, Any]) -> dict[str, Any]:
+        return await self._guard(data["accountId"], lambda: self.inner.publish_draft(data))
+
     # ---- 核心 ----
 
-    async def ensure_session(self, account_id: str, force: bool = False) -> None:
+    async def ensure_session(self, account_id: str, force: bool = False, *, allow_relogin: bool = True) -> None:
         if not force and self._valid_until.get(account_id, 0) > time.monotonic():
             return
         result = await self._check(account_id)
@@ -110,10 +128,13 @@ class SessionGuardedDriver:
             return
         if result["status"] == "missing":
             raise ServiceError("fanqie_account_missing", f"本地没有番茄账号 {account_id}，需要先完成一次番茄登录", 404, result)
+        if not allow_relogin:
+            self._set_state(account_id, result["status"], "登录态不可用，后台刷新不会打开登录窗口", result.get("checkedAt"))
+            raise ServiceError("fanqie_login_required", f"番茄账号 {account_id} 登录态需要更新", 401, result)
         await self._relogin(account_id)
 
-    async def _guard(self, account_id: str, operation: Callable[[], Awaitable[Any]]) -> Any:
-        await self.ensure_session(account_id)
+    async def _guard(self, account_id: str, operation: Callable[[], Awaitable[Any]], *, passive: bool = False) -> Any:
+        await self.ensure_session(account_id, allow_relogin=not passive)
         try:
             return await operation()
         except ServiceError as error:
@@ -126,6 +147,9 @@ class SessionGuardedDriver:
                 raise error from None
             if recheck["status"] != "expired":
                 raise
+            if passive:
+                self._set_state(account_id, "expired", "登录态已失效，后台刷新不会打开登录窗口", recheck.get("checkedAt"))
+                raise ServiceError("fanqie_login_required", f"番茄账号 {account_id} 登录态需要更新", 401, recheck)
             log.info("%s 操作中途登录态失效，重新登录后重试一次", account_id)
             await self._relogin(account_id)
             return await operation()

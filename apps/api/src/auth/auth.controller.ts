@@ -1,5 +1,6 @@
 import { Controller, Post, Get, Body, Query } from '@nestjs/common';
 import { AuthService } from './auth.service';
+import { LOCAL_ADMIN_ENABLED, LOCAL_ADMIN_NAME } from '../env';
 
 @Controller('api/v1/auth')
 export class AuthController {
@@ -8,6 +9,16 @@ export class AuthController {
   @Post('login')
   async login(@Body() body: { email: string; password: string }) {
     return this.authService.login(body.email, body.password);
+  }
+
+  @Get('local/config')
+  localConfig() {
+    return { enabled: LOCAL_ADMIN_ENABLED, name: LOCAL_ADMIN_ENABLED ? LOCAL_ADMIN_NAME : null };
+  }
+
+  @Post('local/bootstrap')
+  async localBootstrap() {
+    return this.authService.localBootstrap();
   }
 
   @Post('register')

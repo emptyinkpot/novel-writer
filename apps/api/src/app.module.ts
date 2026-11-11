@@ -13,10 +13,13 @@ import { SessionEntity } from './session/session.entity';
 import { WorkEntity } from './library/work.entity';
 import { OrderEntity } from './payment/order.entity';
 import { ChapterEntity } from './chapter/chapter.entity';
+import { PlatformAccountLinkEntity } from './integrations/platform-account-link.entity';
+import { FanqieModule } from './integrations/fanqie.module';
+import { LocalBootstrapService } from './local-bootstrap.service';
 import { DATA_DIR, USE_MYSQL, requiredEnv } from './env';
 import { resolve } from 'path';
 
-const ENTITIES = [UserEntity, SessionEntity, WorkEntity, OrderEntity, ChapterEntity];
+const ENTITIES = [UserEntity, SessionEntity, WorkEntity, OrderEntity, ChapterEntity, PlatformAccountLinkEntity];
 
 @Module({
   imports: [
@@ -47,6 +50,8 @@ const ENTITIES = [UserEntity, SessionEntity, WorkEntity, OrderEntity, ChapterEnt
     HealthModule,
     PaymentModule,
     ChapterModule,
+    FanqieModule,
   ],
+  providers: [LocalBootstrapService],
 })
 export class AppModule {}

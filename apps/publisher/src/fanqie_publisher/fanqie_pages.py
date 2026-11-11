@@ -11,12 +11,13 @@ import re
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from playwright.async_api import Page
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 
 from .browser import BOOK_MANAGE_URL, WORK_ITEM_SELECTOR, sanitize_file_part
-from .errors import driver_failed
+from .errors import ServiceError, driver_failed
 
 CHAPTER_PREFIX = re.compile(r"^第\s*[0-9一二三四五六七八九十百千万零两]+\s*章\s*")
 NEXT_PAGE_SELECTOR = '.arco-pagination-next, .arco-pagination-item-next, button[aria-label="下一页"], button:has-text("下一页"), a:has-text("下一页")'
@@ -181,7 +182,10 @@ JS_PASTE_CONTENT = """(text) => {
 
 JS_EDITOR_LENGTH = """() => {
   const editor = document.querySelector('.ProseMirror, [contenteditable="true"], .editor-content');
-  return (editor?.textContent || '').replace(/\\s+/g, '').length;
+  if (!editor) return 0;
+  const content = editor.cloneNode(true);
+  content.querySelectorAll('.ProseMirror-widget, [contenteditable="false"]').forEach((node) => node.remove());
+  return (content.textContent || '').replace(/\\s+/g, '').length;
 }"""
 
 JS_SAVE_STATE = """() => {
@@ -645,9 +649,10 @@ async def publish_chapter(page: Page, data: dict[str, Any], account_id: str, evi
     return result
 
 
-async def get_remote_chapter_detail(page: Page, book_id: str, item_id: str) -> dict[str, Any]:
-    """打开章节编辑页，优先读后台 edit_article 接口返回的数据，取不到再读编辑器 DOM。"""
-    edit_url = f"https://fanqienovel.com/main/writer/{book_id}/publish/{item_id}/?enter_from=modifychapter"
+async def get_remote_chapter_detail(page: Page, book_id: str, item_id: str, enter_from: str = "modifychapter") -> dict[str, Any]:
+    """打开章节编辑页，优先读后台 edit_article 接口返回的数据，取不到再读编辑器 DOM。
+    enter_from：已发布章节用 modifychapter，草稿用 modifydraft。"""
+    edit_url = f"https://fanqienovel.com/main/writer/{book_id}/publish/{item_id}/?enter_from={enter_from}"
     detail: dict[str, Any] | None = None
     meta: dict[str, Any] = {}
     try:
@@ -788,3 +793,273 @@ async def update_remote_chapter(page: Page, book_id: str, item_id: str, data: di
     state_path.write_text(json.dumps({**result, "beforeFull": before, "afterFull": after, "targetTitle": target_title,
                                       "targetContentText": target_text}, ensure_ascii=False, indent=2), encoding="utf-8")
     return result
+
+
+# ---------------------------------------------------------------------------
+# 草稿箱操作（原 drafts.py）
+# 番茄编辑器靠自动保存，所以每个写操作完成后都会重新打开草稿读回来核对，核对不上就报错。
+# 删除只按草稿 ID 精确删除，并且要求标题与调用方给出的一致，避免误删。
+# ---------------------------------------------------------------------------
+
+JS_DRAFT_TABLE = """() => Array.from(document.querySelectorAll('.arco-tabs-content-item-active table tbody tr')).map((r, i) => {
+  const cells = Array.from(r.querySelectorAll('td'));
+  const hrefs = Array.from(r.querySelectorAll('a')).map((a) => a.getAttribute('href') || '').join(' ');
+  return {
+    index: i,
+    title: cells[0]?.textContent?.trim() || '',
+    words: cells[1]?.textContent?.trim() || '',
+    updated: cells[2]?.textContent?.trim() || '',
+    hrefs,
+    hasDelete: Boolean(r.querySelector('.icon-delete')),
+  };
+})"""
+
+JS_DRAFT_PAGER = """() => {
+  const pane = document.querySelector('.arco-tabs-content-item-active');
+  const first = pane?.querySelector('table tbody tr');
+  const href = first?.querySelector('a')?.getAttribute('href') || '';
+  const itemId = (href.match(/\\/publish\\/(\\d+)/) || href.match(/&(\\d+)(?:$|[?&])/ ) || [])[1] || '';
+  return {
+    active: pane?.querySelector('.arco-pagination-item-active')?.textContent?.trim() || '',
+    firstItemId: itemId,
+    rowCount: pane ? pane.querySelectorAll('table tbody tr').length : 0,
+  };
+}"""
+
+DRAFT_NEXT = ".arco-tabs-content-item-active .arco-pagination-item-next"
+_SPACE = re.compile(r"\s+")
+_TITLE_PREFIX = re.compile(r"^第\s*[0-9一二三四五六七八九十百千万零两]*\s*章\s*")
+
+
+def plain_title(value: Any) -> str:
+    """去掉"第N章"前缀（包括没填章节号时的"第 章"），只比较标题正文。"""
+    return _TITLE_PREFIX.sub("", normalize_text(value)).strip()
+
+
+def _draft_id(hrefs: str) -> str | None:
+    match = re.search(r"/publish/(\d+)", hrefs) or re.search(r"&(\d+)", hrefs)
+    return match.group(1) if match else None
+
+
+def _to_int(value: Any) -> int:
+    try:
+        return int(str(value).replace(",", "").strip() or 0)
+    except ValueError:
+        return 0
+
+
+def _compact(text: Any) -> str:
+    """核对正文时忽略空白和换行差异（番茄会规整段落）。"""
+    return _SPACE.sub("", normalize_text(text))
+
+
+async def _open_drafts_tab(page: Page, chapter_manage_url: str) -> None:
+    await page.goto(chapter_manage_url, wait_until="domcontentloaded", timeout=60000)
+    await page.wait_for_timeout(2000)
+    await page.locator(".arco-tabs-header-title-text", has_text="草稿箱").first.click()
+    await page.wait_for_timeout(2500)
+
+
+async def _iterate_draft_pages(page: Page):
+    """逐页产出草稿箱当前页的行；每次翻页都确认页码和首行确实变化，翻不过去就报错。"""
+    for _ in range(200):
+        yield await page.evaluate(JS_DRAFT_TABLE)
+        next_button = page.locator(DRAFT_NEXT).first
+        if not await _safe(next_button.is_visible(), False):
+            return
+        class_name = await _safe(next_button.get_attribute("class"), "") or ""
+        if re.search(r"disabled", class_name, re.I):
+            return
+        before = await page.evaluate(JS_DRAFT_PAGER)
+        turned = False
+        for _attempt in range(2):
+            await _safe(next_button.click())
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline:
+                await page.wait_for_timeout(300)
+                now = await _safe(page.evaluate(JS_DRAFT_PAGER), before)
+                page_changed = now["active"] != before["active"]
+                rows_changed = now["firstItemId"] != before["firstItemId"] or now["rowCount"] != before["rowCount"]
+                if rows_changed and (page_changed or now["firstItemId"]):
+                    turned = True
+                    break
+            if turned:
+                break
+        if not turned:
+            raise driver_failed(f"草稿箱翻页失败：停在第 {before['active']} 页")
+        await page.wait_for_timeout(300)
+    raise driver_failed("草稿箱页数超过扫描上限 200，未返回部分结果")
+
+
+def _row_to_draft(row: dict[str, Any]) -> dict[str, Any]:
+    title = row["title"]
+    return {
+        "itemId": _draft_id(row["hrefs"]),
+        "title": title,
+        "chapterNumber": parse_chapter_number(title) or None,
+        "wordCount": _to_int(row["words"]),
+        "updatedAt": row["updated"] or None,
+    }
+
+
+async def list_drafts(page: Page, book_id: str, chapter_manage_url: str | None = None) -> list[dict[str, Any]]:
+    if not chapter_manage_url:
+        work = await _find_work(page, book_id)
+        chapter_manage_url = work.get("chapterManageUrl")
+    if not chapter_manage_url:
+        raise driver_failed(f"作品缺少章节管理入口: {book_id}")
+    parsed = urlsplit(chapter_manage_url)
+    expected_path = f"/main/writer/chapter-manage/{book_id}"
+    if parsed.hostname not in {"fanqienovel.com", "www.fanqienovel.com"} or not re.match(
+        rf"^{re.escape(expected_path)}(?:&|/|$)", parsed.path
+    ):
+        raise driver_failed(f"作品入口与 bookId 不匹配: {book_id}")
+    await _open_drafts_tab(page, chapter_manage_url)
+    drafts_list: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    async for rows in _iterate_draft_pages(page):
+        for row in rows:
+            draft = _row_to_draft(row)
+            if draft["itemId"] and draft["itemId"] not in seen:
+                seen.add(draft["itemId"])
+                drafts_list.append(draft)
+    return drafts_list
+
+
+async def get_draft(page: Page, book_id: str, item_id: str) -> dict[str, Any]:
+    detail = await get_remote_chapter_detail(page, book_id, item_id, enter_from="modifydraft")
+    return {**detail, "isDraft": True}
+
+
+async def _draft_replace_content(page: Page, content: str) -> None:
+    """清空正文编辑器后用粘贴事件写入（ProseMirror 才会更新内部状态），失败再逐字输入。"""
+    editor = page.locator(".ProseMirror").first
+    await editor.wait_for(state="visible", timeout=20000)
+    await editor.click(force=True)
+    await page.keyboard.press("Control+A")
+    await page.keyboard.press("Delete")
+    await page.wait_for_timeout(300)
+    if not content:
+        return
+    await page.evaluate(JS_PASTE_CONTENT, content)
+    await page.wait_for_timeout(1000)
+    if await page.evaluate(JS_EDITOR_LENGTH) > 0:
+        return
+    await editor.click(force=True)
+    await page.keyboard.type(content, delay=1)
+    await page.wait_for_timeout(1000)
+    if await page.evaluate(JS_EDITOR_LENGTH) == 0:
+        raise driver_failed("正文写入编辑器失败")
+
+
+async def _settle_autosave(page: Page) -> None:
+    await _wait_for_auto_save(page, 15000)
+    await page.wait_for_timeout(3000)
+
+
+def _verify_draft(detail: dict[str, Any], title: str | None, content: str | None) -> dict[str, Any]:
+    checks = {}
+    if title is not None:
+        checks["titleMatched"] = plain_title(detail.get("title")) == plain_title(title)
+    if content is not None:
+        checks["contentMatched"] = _compact(detail.get("contentText")) == _compact(content)
+    checks["verified"] = all(checks.values()) if checks else True
+    return checks
+
+
+async def save_new_draft(page: Page, book_id: str, title: str, content: str, chapter_number: int | None = None) -> dict[str, Any]:
+    """新建草稿：打开新建章节页（番茄随即生成草稿）→ 填写 → 等自动保存 → 不提交，读回核对。"""
+    await _open_create_chapter_page(page, book_id)
+    match = re.search(r"/publish/(\d+)", page.url)
+    if not match:
+        raise driver_failed(f"新建章节页没有生成草稿 ID: {page.url}")
+    item_id = match.group(1)
+    if chapter_number:
+        await _fill_chapter_number(page, int(chapter_number))
+    await _fill_title(page, title)
+    await _draft_replace_content(page, content)
+    await _settle_autosave(page)
+    detail = await get_draft(page, book_id, item_id)
+    verification = _verify_draft(detail, title, content)
+    if not verification["verified"]:
+        raise driver_failed(f"草稿保存后核对不一致（草稿 ID {item_id}）", {"itemId": item_id, "verification": verification})
+    return {"bookId": str(book_id), "itemId": item_id, "title": detail.get("title"), "wordCount": detail.get("wordCount"),
+            "verification": verification}
+
+
+async def update_draft(page: Page, book_id: str, item_id: str, title: str | None, content: str | None) -> dict[str, Any]:
+    """修改草稿：打开草稿编辑页，替换标题/正文，等自动保存后读回核对。"""
+    before = await get_draft(page, book_id, item_id)  # 停留在草稿编辑页
+    if title is not None:
+        await _fill_title(page, title)
+    if content is not None:
+        await _draft_replace_content(page, content)
+    await _settle_autosave(page)
+    after = await get_draft(page, book_id, item_id)
+    verification = _verify_draft(after, title, content)
+    if not verification["verified"]:
+        raise driver_failed(f"草稿修改后核对不一致（草稿 ID {item_id}）", {"itemId": item_id, "verification": verification})
+    summarize = lambda d: {"title": d.get("title"), "wordCount": d.get("wordCount"), "contentPreview": str(d.get("contentText") or "")[:120]}
+    return {"bookId": str(book_id), "itemId": str(item_id), "before": summarize(before), "after": summarize(after),
+            "verification": verification}
+
+
+async def delete_draft(page: Page, book_id: str, item_id: str, expected_title: str) -> dict[str, Any]:
+    """按草稿 ID 删除；标题必须与 expected_title 一致才删，否则拒绝。删除后翻遍草稿箱确认已消失。"""
+    work = await _find_work(page, book_id)
+    await _open_drafts_tab(page, work["chapterManageUrl"])
+    target = None
+    async for rows in _iterate_draft_pages(page):
+        target = next((r for r in rows if _draft_id(r["hrefs"]) == str(item_id)), None)
+        if target:
+            break
+    if not target:
+        raise ServiceError("draft_not_found", f"草稿箱里没有这个草稿: {item_id}", 404)
+    if plain_title(target["title"]) != plain_title(expected_title):
+        raise ServiceError("draft_title_mismatch", f"标题不一致，拒绝删除：草稿箱里是「{target['title']}」，请求的是「{expected_title}」", 409)
+    if not target["hasDelete"]:
+        raise driver_failed("这条草稿没有删除按钮")
+    await page.locator(".arco-tabs-content-item-active table tbody tr").nth(target["index"]).locator(".icon-delete").click()
+    await page.wait_for_timeout(1000)
+    modal = page.locator(".arco-modal:visible")
+    if "删除该草稿" not in (await _safe(modal.first.inner_text(), "") or ""):
+        raise driver_failed("没有出现删除确认框")
+    await modal.locator("button", has_text="删除").first.click()
+    await page.wait_for_timeout(2500)
+    await _open_drafts_tab(page, work["chapterManageUrl"])
+    async for rows in _iterate_draft_pages(page):
+        if any(_draft_id(r["hrefs"]) == str(item_id) for r in rows):
+            raise driver_failed(f"删除后草稿仍在草稿箱: {item_id}")
+    return {"bookId": str(book_id), "itemId": str(item_id), "deleted": True, "title": target["title"]}
+
+
+async def publish_draft(page: Page, book_id: str, item_id: str, chapter_number: int, dry_run: bool, account_id: str,
+                        evidence_dir: Path) -> dict[str, Any]:
+    """把草稿发布出去：打开草稿 → 填章节号 → 走发布流程 → 回读章节列表确认。演练模式只检查表单，不改动草稿。"""
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    work = await _find_work(page, book_id)
+    latest = int(work.get("latestChapterNumber") or 0)
+    continuity_ok = int(chapter_number) == latest + 1
+    detail = await get_draft(page, book_id, item_id)  # 停留在草稿编辑页
+    fields = await page.evaluate(JS_FORM_FIELDS)
+    problems = [name for name, ok in (("找不到章节号输入框", fields["chapterNumberInput"]), ("找不到标题输入框", fields["titleInput"]),
+                                      ("找不到正文编辑器", fields["contentEditor"]), ("草稿正文为空", bool(_compact(detail.get("contentText")))),
+                                      (f"章节不连续：番茄最新 {latest}，待发布 {chapter_number}", continuity_ok)) if not ok]
+    base = {"bookId": str(book_id), "itemId": str(item_id), "chapterNumber": int(chapter_number), "title": detail.get("title"),
+            "wordCount": detail.get("wordCount"), "latestBefore": latest, "form": fields, "problems": problems}
+    if dry_run or problems:
+        return {**base, "dryRun": dry_run, "success": not problems, "confirmed": False}
+    await _fill_chapter_number(page, int(chapter_number))
+    await _settle_autosave(page)
+    tag = f"{sanitize_file_part(account_id)}-{sanitize_file_part(book_id)}-{chapter_number}-{int(time.time() * 1000)}"
+    try:
+        await _submit_publish(page)
+    except Exception as error:
+        await _safe(page.screenshot(path=str(evidence_dir / f"failed-draft-publish-{tag}.png"), full_page=True))
+        raise driver_failed(f"草稿发布提交失败: {error}") from error
+    chapters = await list_remote_chapters(page, book_id)
+    matched = next((c for c in chapters if int(c.get("chapterNumber") or 0) == int(chapter_number)), None)
+    await _safe(page.screenshot(path=str(evidence_dir / f"draft-publish-{tag}.png"), full_page=True))
+    if not matched:
+        raise driver_failed(f"发布提交后未在远端章节列表确认第 {chapter_number} 章", base)
+    return {**base, "dryRun": False, "success": True, "confirmed": True, "matchedChapter": matched}

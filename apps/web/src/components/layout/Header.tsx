@@ -5,6 +5,7 @@ import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import { Sun, Moon } from 'lucide-react'
 import { useState } from 'react'
+import { useAuthStore } from '@/stores/auth'
 
 const navItems = [
   { label: '首页', href: '/' },
@@ -18,6 +19,7 @@ const navItems = [
 export default function Header() {
   const pathname = usePathname()
   const [dark, setDark] = useState(false)
+  const { user, isLoggedIn } = useAuthStore()
 
   const toggleTheme = () => {
     setDark(!dark)
@@ -70,12 +72,16 @@ export default function Header() {
           <button className="flex h-8 items-center justify-center gap-1 rounded-md px-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">
             返现
           </button>
-          <Link
-            href="/login"
-            className="rounded-md bg-blue-500 px-5 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
-          >
-            登录
-          </Link>
+          {isLoggedIn ? (
+            <span className="max-w-36 truncate px-2 text-sm text-zinc-600 dark:text-zinc-300">{user?.name || user?.email || '已登录'}</span>
+          ) : (
+            <Link
+              href="/login"
+              className="rounded-md bg-blue-500 px-5 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              登录
+            </Link>
+          )}
         </div>
       </div>
     </header>

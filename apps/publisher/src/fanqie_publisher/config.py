@@ -20,7 +20,7 @@ def load_env_file(path: Path) -> None:
     """只填充尚未设置的环境变量，显式传入的配置优先。"""
     if not path.exists():
         return
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -56,6 +56,7 @@ class Config:
     session_cache_seconds: int
     auto_relogin: bool
     session_watch_minutes: int
+    catalog_scan_minutes: int
     login_timeout_seconds: int
     version: str = VERSION
 
@@ -85,5 +86,6 @@ def load_config() -> Config:
         session_cache_seconds=_env_int("FANQIE_SESSION_CACHE_MINUTES", 10) * 60,
         auto_relogin=os.environ.get("FANQIE_AUTO_RELOGIN", "1") != "0",
         session_watch_minutes=_env_int("FANQIE_SESSION_WATCH_MINUTES", 180),
+        catalog_scan_minutes=_env_int("FANQIE_CATALOG_SCAN_MINUTES", 15),
         login_timeout_seconds=_env_int("FANQIE_LOGIN_TIMEOUT_MS", 10 * 60 * 1000) // 1000,
     )

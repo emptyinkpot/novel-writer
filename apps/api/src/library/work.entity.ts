@@ -1,13 +1,22 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, RelationId, Index } from 'typeorm';
 import { columnTypes } from '../env';
+import { UserEntity } from '../user/user.entity';
 
 @Entity('works')
+@Index('idx_works_owner_updated', ['owner', 'updatedAt'])
 export class WorkEntity {
   @PrimaryGeneratedColumn()
   id: number;
 
   @Column({ length: 200 })
   title: string;
+
+  @ManyToOne(() => UserEntity, { nullable: true, onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'owner_user_id' })
+  owner: UserEntity | null;
+
+  @RelationId((work: WorkEntity) => work.owner)
+  ownerUserId: number | null;
 
   @Column({ name: 'alternative_titles', type: 'text', nullable: true })
   alternativeTitles: string;
