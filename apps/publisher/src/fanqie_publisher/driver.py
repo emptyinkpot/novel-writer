@@ -215,11 +215,18 @@ class PlaywrightFanqieDriver:
     async def _wait_logged_in(self, page, context) -> dict[str, Any]:
         deadline = time.monotonic() + self.config.login_timeout_seconds
         state: dict[str, Any] = {}
+        log_path = self.config.acceptance_dir / "login-discovery.log"
         while time.monotonic() < deadline:
             state = await read_page_state(page)
             if self._looks_logged_in(state):
                 return state
-            identity = cookie_identity(await context.cookies(IDENTITY_COOKIE_URLS))
+            cookies = await context.cookies(IDENTITY_COOKIE_URLS)
+            identity = cookie_identity(cookies)
+            # 记录检测过程，登录卡住时据此定位：页面停在哪、登录 cookie 有没有出现。
+            with log_path.open("a", encoding="utf-8") as log_file:
+                log_file.write(f"{now_iso()} url={state.get('url')} works={state.get('workCount')} "
+                               f"uid={'有' if identity['uid'] else '无'} session={'有' if identity['session'] else '无'} "
+                               f"cookies={sorted({c.get('name') for c in cookies})[:30]}\n")
             if identity["uid"] and identity["session"]:
                 try:
                     await page.goto(BOOK_MANAGE_URL, wait_until="domcontentloaded", timeout=60000)
@@ -267,11 +274,16 @@ class PlaywrightFanqieDriver:
 
     async def publish_chapter(self, data: dict[str, Any]) -> dict[str, Any]:
         evidence_dir = self.config.acceptance_dir / "publish"
+        action = pages.inspect_publish_form if data.get("dryRun") else pages.publish_chapter
         result = await self._run(
             data["accountId"],
-            lambda page, account: pages.publish_chapter(page, data, account.id, evidence_dir),
+            lambda page, account: action(page, data, account.id, evidence_dir),
             headless=data.get("headless") is not False,
         )
+        if data.get("dryRun"):
+            return {"platform": "fanqie", "accountId": data["accountId"], "bookId": str(data["bookId"]),
+                    "chapterNumber": int(data["chapterNumber"]), "confirmed": False, "confirmedAt": now_iso(),
+                    "evidence": sanitize_evidence(result)}
         return {
             "platform": "fanqie", "accountId": data["accountId"], "bookId": str(result.get("bookId") or data["bookId"]),
             "chapterNumber": int(data["chapterNumber"]), "confirmed": result.get("confirmed") is True,

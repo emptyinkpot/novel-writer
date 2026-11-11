@@ -89,8 +89,8 @@ def test_publish_validation_and_dry_run(client):
     assert bad.status_code == 400 and bad.json()["code"] == "invalid_publish_input"
     result = client.post("/publish/chapter", json={"accountId": "acc", "bookId": "7001", "chapterNumber": 1, "title": "t",
                                                    "content": "c", "dryRun": True}).json()["data"]
-    assert result["status"] == "succeeded" and result["confirmation"]["evidence"] == {"dryRun": True}
-    assert "publish" not in client.fake.calls
+    assert result["status"] == "succeeded"
+    assert "publish" in client.fake.calls  # 演练会真实打开新建章节页检查表单
     job = client.get(f"/publish/jobs/{result['jobId']}").json()["data"]
     assert job["status"] == "succeeded"
 
@@ -132,3 +132,10 @@ def test_reader_parsing_helpers():
     assert state == {"page": {"bookId": "1"}}
     chapters = flatten_chapters([{"volume_name": "卷一", "chapterList": [{"itemId": "9", "title": "第1章", "realChapterOrder": 1}]}])
     assert chapters == [{"itemId": "9", "title": "第1章", "chapterNumber": 1, "volumeName": "卷一", "isLocked": None}]
+
+
+def test_chapter_number_parsing():
+    from fanqie_publisher.fanqie_pages import parse_chapter_number as parse
+    cases = {"第九十五章 x": 95, "第一百零三章": 103, "第十二章": 12, "第200章 镜子": 200, "第 7 章": 7,
+             "第两千零一章": 2001, "五十八章 漏写第字": 58, "番外：后记": 0, "人物介绍": 0}
+    assert {k: parse(k) for k in cases} == cases

@@ -41,6 +41,40 @@ def html_to_plain_text(value: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", html.unescape(text)).strip()
 
 
+CN_DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+CN_UNITS = {"十": 10, "百": 100, "千": 1000, "万": 10000}
+CHAPTER_NUMBER = re.compile(r"第\s*([0-9]+|[零〇一二两三四五六七八九十百千万]+)\s*章")
+CHAPTER_NUMBER_NO_PREFIX = re.compile(r"\s*([0-9]+|[零〇一二两三四五六七八九十百千万]+)\s*章")
+
+
+def chinese_to_int(text: str) -> int:
+    """中文数字转整数：九十五 → 95，一百零三 → 103，十二 → 12。"""
+    total, section, digit = 0, 0, 0
+    for ch in text:
+        if ch in CN_DIGITS:
+            digit = CN_DIGITS[ch]
+        elif ch in CN_UNITS:
+            unit = CN_UNITS[ch]
+            if unit == 10000:
+                total += (section + digit) * unit
+                section = 0
+            else:
+                section += (digit or 1) * unit
+            digit = 0
+    return total + section + digit
+
+
+def parse_chapter_number(title: Any) -> int:
+    """从章节标题里取章节号，阿拉伯数字和中文数字都支持。"""
+    text = str(title or "")
+    # 优先匹配“第N章”；作者漏写“第”时（如“五十八章 ……”），接受开头的“N章”。
+    match = CHAPTER_NUMBER.search(text) or CHAPTER_NUMBER_NO_PREFIX.match(text)
+    if not match:
+        return 0
+    value = match.group(1)
+    return int(value) if value.isdigit() else chinese_to_int(value)
+
+
 def clean_content(content: str) -> str:
     """清理从上游编辑器/AI 工具漏进正文的控制文字和定位噪声。"""
     cleaned = normalize_text(content)
@@ -96,12 +130,6 @@ JS_CHAPTER_ROWS = """() => Array.from(document.querySelectorAll('table tbody tr'
     editUrl: editLink?.href || '',
   };
 }).filter((item) => item.itemId && item.title)"""
-
-JS_SCROLL_TABLE = """() => {
-  [document.querySelector('.arco-table-body'), document.querySelector('.arco-table-body-inner'),
-   document.querySelector('.arco-table-container'), document.scrollingElement || document.documentElement || document.body]
-    .filter(Boolean).forEach((t) => { t.scrollTop = t.scrollHeight; });
-}"""
 
 JS_CLOSE_POPUPS = """() => {
   for (const el of Array.from(document.querySelectorAll('[class*="close"], [aria-label*="close"]'))) {
@@ -260,7 +288,10 @@ async def goto_book_manage(page: Page) -> None:
 async def list_works(page: Page) -> list[dict[str, Any]]:
     """读取当前账号的作品列表。bookId 来自 DOM id，是发布用的远端作品身份。"""
     await goto_book_manage(page)
-    return await page.evaluate(JS_LIST_WORKS)
+    works = await page.evaluate(JS_LIST_WORKS)
+    for work in works:
+        work["latestChapterNumber"] = parse_chapter_number(work.get("latestChapterLabel")) or work.get("latestChapterNumber") or 0
+    return works
 
 
 async def _find_work(page: Page, book_id: str) -> dict[str, Any]:
@@ -271,8 +302,14 @@ async def _find_work(page: Page, book_id: str) -> dict[str, Any]:
     return work
 
 
+JS_PAGER_STATE = """() => ({
+  active: document.querySelector('.arco-pagination-item-active')?.textContent?.trim() || '',
+  firstRow: document.querySelector('table tbody tr td')?.textContent?.trim() || '',
+})"""
+
+
 async def list_remote_chapters(page: Page, book_id: str) -> list[dict[str, Any]]:
-    """分页读取远端章节；每页先滚动到底，适配懒加载列表。"""
+    """读取远端全部章节。每翻一页都确认页码和首行确实变了；翻页失败直接报错，不返回残缺列表。"""
     work = await _find_work(page, book_id)
     if not work.get("chapterManageUrl"):
         raise driver_failed(f"未找到作品或章节管理链接: {book_id}")
@@ -281,31 +318,38 @@ async def list_remote_chapters(page: Page, book_id: str) -> list[dict[str, Any]]
     await page.wait_for_timeout(1200)
     collected: list[dict[str, Any]] = []
     seen: set[str] = set()
-    last_total = 0
-    for _ in range(50):
-        stable_rounds = 0
-        while stable_rounds < 3:
-            before = len(collected)
-            for row in await page.evaluate(JS_CHAPTER_ROWS):
-                if row["itemId"] not in seen:
-                    seen.add(row["itemId"])
-                    collected.append(row)
-            stable_rounds = stable_rounds + 1 if len(collected) == before else 0
-            await _safe(page.evaluate(JS_SCROLL_TABLE))
-            await page.wait_for_timeout(900)
-        if len(collected) <= last_total:
-            break
-        last_total = len(collected)
+    for page_index in range(200):
+        for row in await page.evaluate(JS_CHAPTER_ROWS):
+            row["chapterNumber"] = parse_chapter_number(row["title"])
+            if row["itemId"] not in seen:
+                seen.add(row["itemId"])
+                collected.append(row)
         next_button = page.locator(NEXT_PAGE_SELECTOR).first
         if not await _safe(next_button.is_visible(), False):
             break
         class_name = await _safe(next_button.get_attribute("class"), "") or ""
         aria_disabled = await _safe(next_button.get_attribute("aria-disabled"), "") or ""
-        if aria_disabled == "true" or re.search(r"disabled", class_name, re.I) or not await _safe(next_button.is_enabled(), False):
+        if aria_disabled == "true" or re.search(r"disabled", class_name, re.I):
             break
-        await _safe(next_button.click())
-        await page.wait_for_timeout(1200)
-        await _safe(page.wait_for_selector("table tbody tr", state="visible", timeout=20000))
+        before = await page.evaluate(JS_PAGER_STATE)
+        turned = False
+        for _attempt in range(2):
+            await _safe(next_button.click())
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline:
+                await page.wait_for_timeout(300)
+                now = await _safe(page.evaluate(JS_PAGER_STATE), before)
+                if now["active"] != before["active"] and now["firstRow"] and now["firstRow"] != before["firstRow"]:
+                    turned = True
+                    break
+            if turned:
+                break
+        if not turned:
+            raise driver_failed(f"章节列表翻页失败：停在第 {before['active']} 页，已读取 {len(collected)} 章")
+        await page.wait_for_timeout(300)
+    expected = int(work.get("chapterCount") or 0)
+    if expected and len(collected) < expected:
+        raise driver_failed(f"章节列表不完整：作品显示 {expected} 章，只读到 {len(collected)} 章")
     return collected
 
 
@@ -476,6 +520,85 @@ async def _submit_publish(page: Page) -> Any:
         )
     await page.wait_for_timeout(5000)
     return captured["response"]
+
+
+JS_FORM_FIELDS = """() => {
+  const visible = (el) => { if (!el) return false; const r = el.getBoundingClientRect(); const s = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
+  const inputs = Array.from(document.querySelectorAll('input')).filter(visible);
+  const isTitle = (el) => /标题|章节名|title/i.test(`${el.placeholder || ''} ${el.name || ''} ${el.className || ''}`);
+  const number = inputs.find((el) => String(el.className || '').includes('serial-input'))
+    || inputs.find((el) => !isTitle(el) && (el.type === 'number' || el.inputMode === 'numeric')) || inputs.find((el) => !isTitle(el));
+  const title = inputs.find(isTitle);
+  const editor = Array.from(document.querySelectorAll('.ProseMirror, [contenteditable="true"], .editor-content, textarea')).find(visible);
+  return {
+    url: location.href,
+    chapterNumberInput: Boolean(number), chapterNumberHint: number ? (number.placeholder || number.className || '') : null,
+    titleInput: Boolean(title), titleHint: title ? (title.placeholder || '') : null,
+    contentEditor: Boolean(editor), editorKind: editor ? (editor.className || editor.tagName) : null,
+    nextButton: Array.from(document.querySelectorAll('button')).some((b) => (b.textContent || '').trim() === '下一步' && visible(b)),
+  };
+}"""
+
+
+JS_DRAFT_ROWS = """() => Array.from(document.querySelectorAll('.arco-tabs-content-item-active table tbody tr')).map((r, i) => ({
+  i, title: r.querySelector('td')?.textContent?.trim() || '', words: r.querySelectorAll('td')[1]?.textContent?.trim() || '',
+  hrefs: Array.from(r.querySelectorAll('a')).map((a) => a.getAttribute('href') || '').join(' '),
+  hasDelete: Boolean(r.querySelector('.icon-delete')),
+}))"""
+
+
+async def _open_drafts(page: Page, chapter_manage_url: str) -> list[dict[str, Any]]:
+    await page.goto(chapter_manage_url, wait_until="domcontentloaded", timeout=60000)
+    await page.wait_for_timeout(2000)
+    await page.locator(".arco-tabs-header-title-text", has_text="草稿箱").first.click()
+    await page.wait_for_timeout(2500)
+    return await page.evaluate(JS_DRAFT_ROWS)
+
+
+async def delete_empty_draft(page: Page, chapter_manage_url: str, item_id: str) -> str:
+    """删除打开新建章节页时番茄自动生成的空草稿。只删标题为“未命名草稿”、0 字、ID 完全匹配的那一条。"""
+    rows = await _open_drafts(page, chapter_manage_url)
+    match = [r for r in rows if item_id in r["hrefs"]]
+    if not match:
+        return "not_found"
+    row = match[0]
+    if row["title"] != "未命名草稿" or row["words"] != "0" or not row["hasDelete"]:
+        return "kept_not_empty"
+    await page.locator(".arco-tabs-content-item-active table tbody tr").nth(row["i"]).locator(".icon-delete").click()
+    await page.wait_for_timeout(1000)
+    modal = page.locator(".arco-modal:visible")
+    if "删除该草稿" not in (await _safe(modal.first.inner_text(), "") or ""):
+        return "confirm_dialog_missing"
+    await modal.locator("button", has_text="删除").first.click()
+    await page.wait_for_timeout(2000)
+    after = await _open_drafts(page, chapter_manage_url)
+    return "deleted" if not any(item_id in r["hrefs"] for r in after) else "delete_failed"
+
+
+async def inspect_publish_form(page: Page, data: dict[str, Any], account_id: str, evidence_dir: Path) -> dict[str, Any]:
+    """演练发布：打开新建章节页，确认表单都找得到、章节号连续。不填任何内容，不点任何按钮。"""
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    chapter_number = int(data["chapterNumber"])
+    work = await _open_create_chapter_page(page, data["bookId"])
+    latest_before = int(work.get("latestChapterNumber") or 0)
+    fields = await page.evaluate(JS_FORM_FIELDS)
+    continuity_ok = data.get("enforceContinuity") is False or chapter_number == latest_before + 1
+    tag = f"{sanitize_file_part(account_id)}-{sanitize_file_part(data['bookId'])}-{chapter_number}-{int(time.time() * 1000)}"
+    screenshot = evidence_dir / f"dry-run-{tag}.png"
+    await _safe(page.screenshot(path=str(screenshot), full_page=True))
+    # 打开新建章节页时番茄会自动建一个空草稿，演练结束后删掉，不在作者后台留痕。
+    draft_match = re.search(r"/publish/(\d+)", fields.get("url") or "")
+    draft_cleanup = "no_draft_id"
+    if draft_match and work.get("chapterManageUrl"):
+        draft_cleanup = await _safe(delete_empty_draft(page, work["chapterManageUrl"], draft_match.group(1)), "cleanup_error")
+    ready = fields["chapterNumberInput"] and fields["titleInput"] and fields["contentEditor"] and continuity_ok
+    problems = [name for name, ok in (("找不到章节号输入框", fields["chapterNumberInput"]), ("找不到标题输入框", fields["titleInput"]),
+                                      ("找不到正文编辑器", fields["contentEditor"]),
+                                      (f"章节不连续：番茄最新 {latest_before}，待发布 {chapter_number}", continuity_ok)) if not ok]
+    return {"success": ready, "dryRun": True, "accountId": account_id, "bookId": str(data["bookId"]), "chapterNumber": chapter_number,
+            "work": work, "latestBefore": latest_before, "form": fields, "problems": problems, "draftCleanup": draft_cleanup,
+            "screenshotPath": str(screenshot)}
 
 
 async def publish_chapter(page: Page, data: dict[str, Any], account_id: str, evidence_dir: Path) -> dict[str, Any]:

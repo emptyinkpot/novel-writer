@@ -127,15 +127,14 @@ class PublishService:
     async def _run(self, job: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
         job.update(status="running", startedAt=now_iso(), updatedAt=now_iso())
         try:
+            # 演练（dryRun）也会真实打开新建章节页检查表单，但不填写、不提交。
+            result = await self.lock.run(data["accountId"], lambda: self.driver.publish_chapter(data))
             if data.get("dryRun"):
-                result = {"platform": "fanqie", "accountId": data["accountId"], "bookId": data["bookId"],
-                          "chapterNumber": int(data["chapterNumber"]), "confirmed": False, "confirmedAt": now_iso(),
-                          "evidence": {"dryRun": True}}
+                problems = (result.get("evidence") or {}).get("problems") or []
+                ok, error = not problems, "；".join(problems) or None
             else:
-                result = await self.lock.run(data["accountId"], lambda: self.driver.publish_chapter(data))
-            ok = bool(data.get("dryRun")) or result.get("confirmed")
-            job.update(status="succeeded" if ok else "failed", result=result, finishedAt=now_iso(), updatedAt=now_iso(),
-                       error=None if ok else "platform confirmation failed")
+                ok, error = bool(result.get("confirmed")), None if result.get("confirmed") else "platform confirmation failed"
+            job.update(status="succeeded" if ok else "failed", result=result, finishedAt=now_iso(), updatedAt=now_iso(), error=error)
         except Exception as error:  # noqa: BLE001 - 失败要落到任务状态里
             job.update(status="failed", finishedAt=now_iso(), updatedAt=now_iso(),
                        error=error.message if isinstance(error, ServiceError) else str(error))
